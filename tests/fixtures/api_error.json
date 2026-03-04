@@ -1,0 +1,10 @@
+{
+  "exception": "Query 'Missing' in schema 'lists' doesn't exist.",
+  "exceptionClass": "org.labkey.api.query.QueryNotFoundException",
+  "errors": [
+    {
+      "id": "queryName",
+      "msg": "Unknown query"
+    }
+  ]
+}

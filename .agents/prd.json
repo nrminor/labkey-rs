@@ -59,8 +59,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented reusable integration-test infrastructure with wiremock by adding tests/common/mod.rs helpers for test client construction, fixture loading, and shared mock re-exports. Added tests/client_integration.rs coverage for GET and POST request wiring (URL, params/body shape, auth/header behavior), non-2xx error mapping (JSON API errors -> LabkeyError::Api, non-JSON failures -> LabkeyError::UnexpectedResponse), timeout request-options plumbing via internal feature-gated test support, and multipart form submission/content checks. Added tests/fixtures/api_error.json, added wiremock dev-dependency, and allow-listed all new tracked test paths in .gitignore. Refined test hooks to avoid expanding default public API surface by moving them to a feature-gated internal test-support module. Verified all quality gates with just check after implementation and after review feedback updates."
     },
     {
       "id": "US-004",

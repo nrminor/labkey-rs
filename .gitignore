@@ -30,6 +30,14 @@
 !/src/filter.rs
 !/src/query.rs
 
+# === Allowed: Tests ===
+!/tests
+!/tests/common
+!/tests/common/mod.rs
+!/tests/client_integration.rs
+!/tests/fixtures
+!/tests/fixtures/api_error.json
+
 # === Allowed: GitHub workflows ===
 !/.github
 !/.github/workflows

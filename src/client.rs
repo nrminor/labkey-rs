@@ -313,6 +313,56 @@ impl LabkeyClient {
     }
 }
 
+/// Internal-only helpers used by integration tests to exercise private request
+/// plumbing without expanding the default crate API surface.
+#[cfg(feature = "internal-test-support")]
+pub mod __internal_test_support {
+    use std::time::Duration;
+
+    use url::Url;
+
+    use crate::error::LabkeyError;
+
+    use super::{LabkeyClient, RequestOptions};
+
+    /// Execute a GET request with an explicit timeout through the internal
+    /// request-options path.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever error the underlying request returns, including
+    /// transport, timeout, and response-decoding failures.
+    pub async fn get_with_timeout<T: serde::de::DeserializeOwned>(
+        client: &LabkeyClient,
+        url: Url,
+        params: &[(String, String)],
+        timeout: Duration,
+    ) -> Result<T, LabkeyError> {
+        let options = RequestOptions {
+            timeout: Some(timeout),
+            ..RequestOptions::default()
+        };
+        client.get_with_options(url, params, &options).await
+    }
+
+    /// Execute a multipart POST request through the internal multipart
+    /// transport path.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever error the underlying request returns, including
+    /// transport and response-decoding failures.
+    pub async fn post_multipart<T: serde::de::DeserializeOwned>(
+        client: &LabkeyClient,
+        url: Url,
+        body: reqwest::multipart::Form,
+    ) -> Result<T, LabkeyError> {
+        client
+            .post_multipart(url, body, &RequestOptions::default())
+            .await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
