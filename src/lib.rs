@@ -24,6 +24,7 @@
 
 pub mod client;
 pub mod error;
+pub mod filter;
 
 pub use client::{ClientConfig, Credential, LabkeyClient};
 pub use error::LabkeyError;
