@@ -1872,7 +1872,7 @@ impl LabkeyClient {
             ),
             options
                 .ignore_filter
-                .and_then(|v| v.then(|| (format!("{dr}.ignoreFilter"), "1".into()))),
+                .and_then(|v| v.then(|| (format!("{dr}.ignoreFilter"), "true".into()))),
             match options.max_rows {
                 Some(max) if max < 0 => Some((format!("{dr}.showRows"), "all".into())),
                 Some(max) => Some(("maxRows".into(), max.to_string())),

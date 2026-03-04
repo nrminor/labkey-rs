@@ -228,8 +228,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed focused query parity audit against upstream JS (Query.ts, query/Utils.ts, query/GetData.ts, query/Rows.ts, query/SelectRows.ts, query/SelectDistinctRows.ts, query/ExecuteSql.ts, query/GetQueryDetails.ts) and Java (remoteapi/query). Endpoint checklist: match = get_query_details, get_queries, get_schemas, get_query_views, save_query_views, save_session_view, delete_query_view, get_data_views, validate_query, get_server_date, insert_rows, update_rows, delete_rows, truncate_table, move_rows, save_rows, import_data; partial = select_rows (hardcoded apiVersion 17.1 and no method/timeout toggles compared to JS options), execute_sql (hardcoded apiVersion 17.1 and no requiredVersion/timeout toggles), get_data (typed modeling intentionally removes JS callback/legacy coercion behavior); missing/deferred (no code added per scope guardrail) = JS Visualization namespace, JS experimental SQL namespace, JS callback/helper exports and legacy argument-overload APIs. More than five discrepancies were documented; code fixes were limited to one high-risk wire mismatch: select_distinct_rows now emits ignoreFilter=true (matching upstream SelectDistinctRows.ts) rather than 1. Added/updated integration coverage for query.ignoreFilter=true, grid.ignoreFilter=true, and omission when unset. Verified with just check after implementation and after review-feedback updates."
     },
     {
       "id": "US-013",

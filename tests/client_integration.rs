@@ -311,7 +311,7 @@ async fn select_distinct_rows_sends_expected_get_request_shape() {
         .and(query_param("query.columns", "Gender"))
         .and(query_param("query.showRows", "all"))
         .and(query_param("query.param.Site", "A"))
-        .and(query_param("query.ignoreFilter", "1"))
+        .and(query_param("query.ignoreFilter", "true"))
         .and(header("x-requested-with", "XMLHttpRequest"))
         .and(basic_auth("apikey", "test-api-key"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -333,6 +333,43 @@ async fn select_distinct_rows_sends_expected_get_request_shape() {
                 .max_rows(-1)
                 .ignore_filter(true)
                 .parameters(std::iter::once(("Site".to_string(), "A".to_string())).collect())
+                .build(),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(response.values.len(), 2);
+}
+
+#[tokio::test]
+async fn select_distinct_rows_omits_ignore_filter_when_unset() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/query-selectDistinct.api"))
+        .and(query_param("dataRegionName", "query"))
+        .and(query_param("schemaName", "lists"))
+        .and(query_param("query.queryName", "People"))
+        .and(query_param("query.columns", "Gender"))
+        .and(query_param_is_missing("query.ignoreFilter"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "queryName": "People",
+            "values": ["F", "M"]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .select_distinct_rows(
+            SelectDistinctOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .column("Gender".to_string())
+                .container_path("/Alt/Container".to_string())
                 .build(),
         )
         .await
@@ -399,7 +436,7 @@ async fn select_distinct_rows_supports_custom_data_region_and_positive_max_rows(
         .and(query_param("maxRows", "10"))
         .and(query_param("grid.param.Site", "A"))
         .and(query_param("grid.Status~eq", "Active"))
-        .and(query_param("grid.ignoreFilter", "1"))
+        .and(query_param("grid.ignoreFilter", "true"))
         .and(header("x-requested-with", "XMLHttpRequest"))
         .and(basic_auth("apikey", "test-api-key"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
