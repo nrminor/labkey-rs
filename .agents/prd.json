@@ -39,8 +39,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added internal request option plumbing in src/client.rs by introducing pub(crate) RequestOptions with timeout, no_follow_redirects, and accepted_statuses defaults. Implemented get_with_options and post_with_options and refactored existing get/post to delegate through RequestOptions::default() to preserve external signatures. Added crate-internal post_multipart for multipart/form-data support and enabled reqwest multipart feature in Cargo.toml. Updated response handling to treat configured accepted statuses as success while preserving existing LabkeyError::Api and LabkeyError::UnexpectedResponse mapping for other non-success responses. Added unit tests for RequestOptions defaults and refactored GET/POST request construction compatibility (URL, headers, auth, timeout, and JSON content type). Verified all quality gates with just check before and after code-review feedback integration."
     },
     {
       "id": "US-003",

@@ -5,6 +5,9 @@
 //! default container path, and authentication credentials. Every API endpoint
 //! method is an async method on this struct.
 
+use std::time::Duration;
+
+use reqwest::StatusCode;
 use url::Url;
 
 use crate::error::{ApiErrorBody, LabkeyError};
@@ -87,9 +90,21 @@ fn encode_container_path(path: &str) -> String {
 /// [`select_rows`](Self::select_rows) or [`execute_sql`](Self::execute_sql).
 pub struct LabkeyClient {
     http: reqwest::Client,
+    http_no_redirects: reqwest::Client,
     base_url: Url,
     container_path: String,
     credential: Credential,
+}
+
+/// Internal request options for fine-grained HTTP behavior.
+#[derive(Debug, Default)]
+pub(crate) struct RequestOptions {
+    /// Optional per-request timeout override.
+    pub timeout: Option<Duration>,
+    /// Disable redirect following for this request.
+    pub no_follow_redirects: bool,
+    /// Additional non-success HTTP statuses that should be treated as success.
+    pub accepted_statuses: Vec<StatusCode>,
 }
 
 impl LabkeyClient {
@@ -101,8 +116,12 @@ impl LabkeyClient {
     pub fn new(config: ClientConfig) -> Result<Self, LabkeyError> {
         let base_url = Url::parse(&config.base_url)?;
         let http = reqwest::Client::new();
+        let http_no_redirects = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?;
         Ok(Self {
             http,
+            http_no_redirects,
             base_url,
             container_path: config.container_path,
             credential: config.credential,
@@ -154,16 +173,73 @@ impl LabkeyClient {
         }
     }
 
+    fn apply_request_options(
+        builder: reqwest::RequestBuilder,
+        options: &RequestOptions,
+    ) -> reqwest::RequestBuilder {
+        if let Some(timeout) = options.timeout {
+            builder.timeout(timeout)
+        } else {
+            builder
+        }
+    }
+
+    fn client_for_options(&self, options: &RequestOptions) -> reqwest::Client {
+        if options.no_follow_redirects {
+            self.http_no_redirects.clone()
+        } else {
+            self.http.clone()
+        }
+    }
+
+    fn build_get_request(
+        &self,
+        client: &reqwest::Client,
+        url: Url,
+        params: &[(String, String)],
+        options: &RequestOptions,
+    ) -> Result<reqwest::Request, LabkeyError> {
+        let builder = client.get(url).query(params);
+        let builder = self.prepare_request(builder);
+        let builder = Self::apply_request_options(builder, options);
+        Ok(builder.build()?)
+    }
+
+    fn build_json_post_request<B: serde::Serialize>(
+        &self,
+        client: &reqwest::Client,
+        url: Url,
+        body: &B,
+        options: &RequestOptions,
+    ) -> Result<reqwest::Request, LabkeyError> {
+        let builder = client.post(url).json(body);
+        let builder = self.prepare_request(builder);
+        let builder = Self::apply_request_options(builder, options);
+        Ok(builder.build()?)
+    }
+
     /// Send a GET request and deserialize the JSON response.
     pub(crate) async fn get<T: serde::de::DeserializeOwned>(
         &self,
         url: Url,
         params: &[(String, String)],
     ) -> Result<T, LabkeyError> {
-        let builder = self.http.get(url).query(params);
-        let builder = self.prepare_request(builder);
-        let response = builder.send().await?;
-        self.handle_response(response).await
+        self.get_with_options(url, params, &RequestOptions::default())
+            .await
+    }
+
+    /// Send a GET request with request options and deserialize the JSON response.
+    pub(crate) async fn get_with_options<T: serde::de::DeserializeOwned>(
+        &self,
+        url: Url,
+        params: &[(String, String)],
+        options: &RequestOptions,
+    ) -> Result<T, LabkeyError> {
+        let client = self.client_for_options(options);
+        let request = self.build_get_request(&client, url, params, options)?;
+        let response = client.execute(request).await?;
+        self.handle_response(response, &options.accepted_statuses)
+            .await
     }
 
     /// Send a POST request with a JSON body and deserialize the JSON response.
@@ -172,10 +248,41 @@ impl LabkeyClient {
         url: Url,
         body: &B,
     ) -> Result<T, LabkeyError> {
-        let builder = self.http.post(url).json(body);
+        self.post_with_options(url, body, &RequestOptions::default())
+            .await
+    }
+
+    /// Send a POST request with a JSON body and request options.
+    pub(crate) async fn post_with_options<B: serde::Serialize, T: serde::de::DeserializeOwned>(
+        &self,
+        url: Url,
+        body: &B,
+        options: &RequestOptions,
+    ) -> Result<T, LabkeyError> {
+        let client = self.client_for_options(options);
+        let request = self.build_json_post_request(&client, url, body, options)?;
+        let response = client.execute(request).await?;
+        self.handle_response(response, &options.accepted_statuses)
+            .await
+    }
+
+    /// Send a multipart/form-data POST request and deserialize the JSON response.
+    // TODO(cleanup): Remove this allow when multipart endpoints start using this method.
+    #[allow(dead_code)] // Forward-compatible plumbing before multipart endpoint implementation.
+    pub(crate) async fn post_multipart<T: serde::de::DeserializeOwned>(
+        &self,
+        url: Url,
+        body: reqwest::multipart::Form,
+        options: &RequestOptions,
+    ) -> Result<T, LabkeyError> {
+        let client = self.client_for_options(options);
+        let builder = client.post(url).multipart(body);
         let builder = self.prepare_request(builder);
-        let response = builder.send().await?;
-        self.handle_response(response).await
+        let builder = Self::apply_request_options(builder, options);
+        let request = builder.build()?;
+        let response = client.execute(request).await?;
+        self.handle_response(response, &options.accepted_statuses)
+            .await
     }
 
     /// Check the response status and either deserialize the success body or
@@ -187,9 +294,10 @@ impl LabkeyClient {
     async fn handle_response<T: serde::de::DeserializeOwned>(
         &self,
         response: reqwest::Response,
+        accepted_statuses: &[StatusCode],
     ) -> Result<T, LabkeyError> {
         let status = response.status();
-        if status.is_success() {
+        if status.is_success() || accepted_statuses.contains(&status) {
             let body = response.json::<T>().await?;
             Ok(body)
         } else {
@@ -207,6 +315,8 @@ impl LabkeyClient {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     fn test_client(base_url: &str, container_path: &str) -> LabkeyClient {
@@ -318,5 +428,96 @@ mod tests {
             credential: Credential::ApiKey("test-key".into()),
             container_path: "/Project".into(),
         };
+    }
+
+    #[test]
+    fn request_options_default_values() {
+        let options = RequestOptions::default();
+        assert!(options.timeout.is_none());
+        assert!(!options.no_follow_redirects);
+        assert!(options.accepted_statuses.is_empty());
+    }
+
+    #[test]
+    fn build_get_request_matches_expected_url_and_headers() {
+        let client = test_client("https://labkey.example.com/labkey", "/MyProject/MyFolder");
+        let url = client.build_url("query", "getQuery.api", None);
+        let params = vec![("schemaName".to_string(), "lists".to_string())];
+        let request = client
+            .build_get_request(&client.http, url, &params, &RequestOptions::default())
+            .expect("should build request");
+
+        assert_eq!(request.method(), reqwest::Method::GET);
+        assert_eq!(
+            request.url().as_str(),
+            "https://labkey.example.com/labkey/MyProject/MyFolder/query-getQuery.api?schemaName=lists"
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get("x-requested-with")
+                .and_then(|v| v.to_str().ok()),
+            Some("XMLHttpRequest")
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get("authorization")
+                .and_then(|v| v.to_str().ok()),
+            Some("Basic YXBpa2V5OnRlc3Qta2V5")
+        );
+    }
+
+    #[test]
+    fn build_post_request_matches_expected_url_and_headers() {
+        let client = test_client("https://labkey.example.com/labkey", "/MyProject/MyFolder");
+        let url = client.build_url("query", "executeSql.api", None);
+        let body = serde_json::json!({"schemaName": "core"});
+        let request = client
+            .build_json_post_request(&client.http, url, &body, &RequestOptions::default())
+            .expect("should build request");
+
+        assert_eq!(request.method(), reqwest::Method::POST);
+        assert_eq!(
+            request.url().as_str(),
+            "https://labkey.example.com/labkey/MyProject/MyFolder/query-executeSql.api"
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get("x-requested-with")
+                .and_then(|v| v.to_str().ok()),
+            Some("XMLHttpRequest")
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get("authorization")
+                .and_then(|v| v.to_str().ok()),
+            Some("Basic YXBpa2V5OnRlc3Qta2V5")
+        );
+        assert!(
+            request
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|value| value.starts_with("application/json"))
+        );
+    }
+
+    #[test]
+    fn build_get_request_applies_timeout_option() {
+        let client = test_client("https://labkey.example.com/labkey", "/MyProject");
+        let url = client.build_url("query", "getQuery.api", None);
+        let options = RequestOptions {
+            timeout: Some(Duration::from_secs(5)),
+            ..RequestOptions::default()
+        };
+
+        let request = client
+            .build_get_request(&client.http, url, &[], &options)
+            .expect("should build request");
+
+        assert_eq!(request.timeout(), Some(&Duration::from_secs(5)));
     }
 }
