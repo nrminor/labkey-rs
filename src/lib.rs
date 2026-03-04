@@ -28,6 +28,7 @@ pub mod common;
 pub mod error;
 pub mod filter;
 pub mod query;
+pub mod security;
 
 pub use client::{ClientConfig, Credential, LabkeyClient};
 pub use error::LabkeyError;

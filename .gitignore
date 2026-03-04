@@ -29,6 +29,9 @@
 !/src/common.rs
 !/src/filter.rs
 !/src/query.rs
+!/src/security
+!/src/security/mod.rs
+!/src/security/types.rs
 
 # === Allowed: Tests ===
 !/tests

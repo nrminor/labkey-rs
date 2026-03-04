@@ -248,8 +248,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented the security scaffolding story by adding src/security/mod.rs and src/security/types.rs, exporting pub mod security from src/lib.rs, and re-exporting shared security response vocabulary from the security module. Added the required non-exhaustive shared security types (Container, ContainerFormats, ContainerHierarchy, ModuleProperty, FolderType, FolderTypeWebPart, ModuleInfo, User, Group, Role, RolePermission, SecurableResource, Policy, PolicyAssignment) with Debug/Clone/Deserialize derives and camelCase serde mapping where applicable, including Container type->type_ remapping and recursive hierarchy/resource children support. Moved opt() and container_filter_to_string() from src/query.rs into src/common.rs as pub(crate) helpers with unchanged signatures and behavior, and updated query to import those helpers from common. Added inline unit tests in security/types for required deserialization coverage (Container type mapping, recursive ContainerHierarchy children, ContainerFormats, and minimal fixtures for User, Group, Role, Policy, and SecurableResource) plus additional smoke coverage for ModuleInfo, FolderType, and PolicyAssignment; added direct common helper tests for opt() and container_filter_to_string(). Updated .gitignore allow-list for src/security, src/security/mod.rs, and src/security/types.rs. Solicited feedback from nick-isms/testing-guru/semver-nag, incorporated follow-up hardening, and verified all gates with just check after implementation and again after feedback updates."
     },
     {
       "id": "US-014",

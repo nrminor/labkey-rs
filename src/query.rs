@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     client::LabkeyClient,
-    common::AuditBehavior,
+    common::{AuditBehavior, container_filter_to_string, opt},
     error::LabkeyError,
     filter::{ContainerFilter, Filter, encode_filters},
 };
@@ -1334,22 +1334,6 @@ pub(crate) fn waf_encode(value: &str) -> String {
     let url_encoded = urlencoding::encode(value);
     let b64 = base64::engine::general_purpose::STANDARD.encode(url_encoded.as_bytes());
     format!("/*{{{{base64/x-www-form-urlencoded/wafText}}}}*/{b64}")
-}
-
-/// Serialize a [`ContainerFilter`] to its string representation for use
-/// as a query parameter value.
-fn container_filter_to_string(cf: ContainerFilter) -> String {
-    // ContainerFilter's serde Serialize produces a JSON string like
-    // "CurrentAndSubfolders". We strip the quotes to get the bare value.
-    serde_json::to_value(cf)
-        .ok()
-        .and_then(|v| v.as_str().map(String::from))
-        .unwrap_or_default()
-}
-
-/// Shorthand for building an optional query parameter pair.
-fn opt<V: ToString>(key: impl Into<String>, value: Option<V>) -> Option<(String, String)> {
-    value.map(|v| (key.into(), v.to_string()))
 }
 
 fn insert_option_to_string(insert_option: InsertOption) -> &'static str {
