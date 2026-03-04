@@ -5,10 +5,14 @@ use std::time::Duration;
 use common::{LabkeyError, Mock, MockServer, ResponseTemplate, fixture, test_client};
 #[cfg(feature = "internal-test-support")]
 use labkey_rs::client::__internal_test_support;
-use labkey_rs::query::{ExecuteSqlOptions, SelectRowsOptions};
+use labkey_rs::common::AuditBehavior;
+use labkey_rs::query::{
+    DeleteRowsOptions, ExecuteSqlOptions, InsertRowsOptions, SelectRowsOptions,
+    TruncateTableOptions, UpdateRowsOptions,
+};
 use url::Url;
 use wiremock::matchers::{
-    basic_auth, body_string_contains, header, header_exists, method, path, query_param,
+    basic_auth, body_json, body_string_contains, header, header_exists, method, path, query_param,
 };
 
 #[tokio::test]
@@ -229,4 +233,174 @@ async fn multipart_helper_sends_form_parts() {
         .expect("multipart request should succeed");
 
     assert_eq!(response.get("ok"), Some(&serde_json::Value::Bool(true)));
+}
+
+#[tokio::test]
+async fn insert_rows_sends_expected_mutation_request_shape() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/query-insertRows.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "schemaName": "lists",
+            "queryName": "People",
+            "rows": [{"Name": "Alice"}],
+            "auditBehavior": "SUMMARY"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "command": "insert",
+            "errors": [],
+            "queryName": "People",
+            "rows": [{"RowId": 7, "Name": "Alice"}],
+            "rowsAffected": 1,
+            "schemaName": "lists"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client
+        .insert_rows(
+            InsertRowsOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .rows(vec![serde_json::json!({"Name": "Alice"})])
+                .container_path("/Alt/Container".to_string())
+                .audit_behavior(AuditBehavior::Summary)
+                .build(),
+        )
+        .await
+        .expect("insert rows should succeed");
+
+    assert_eq!(result.command, "insert");
+    assert_eq!(result.rows_affected, 1);
+}
+
+#[tokio::test]
+async fn update_rows_sends_expected_mutation_request_shape() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/query-updateRows.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "schemaName": "lists",
+            "queryName": "People",
+            "rows": [{"RowId": 1, "Name": "Alicia"}],
+            "skipReselectRows": true
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "command": "update",
+            "errors": [],
+            "queryName": "People",
+            "rows": [{"RowId": 1, "Name": "Alicia"}],
+            "rowsAffected": 1,
+            "schemaName": "lists"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client
+        .update_rows(
+            UpdateRowsOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .rows(vec![serde_json::json!({"RowId": 1, "Name": "Alicia"})])
+                .container_path("/Alt/Container".to_string())
+                .skip_reselect_rows(true)
+                .build(),
+        )
+        .await
+        .expect("update rows should succeed");
+
+    assert_eq!(result.command, "update");
+    assert_eq!(result.rows_affected, 1);
+}
+
+#[tokio::test]
+async fn delete_rows_supports_empty_rows_payload() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/query-deleteRows.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "schemaName": "lists",
+            "queryName": "People",
+            "rows": []
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "command": "delete",
+            "errors": [],
+            "queryName": "People",
+            "rows": [],
+            "rowsAffected": 0,
+            "schemaName": "lists"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client
+        .delete_rows(
+            DeleteRowsOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .rows(Vec::new())
+                .container_path("/Alt/Container".to_string())
+                .build(),
+        )
+        .await
+        .expect("delete rows should succeed");
+
+    assert_eq!(result.command, "delete");
+    assert_eq!(result.rows_affected, 0);
+}
+
+#[tokio::test]
+async fn truncate_table_sends_required_fields_without_rows() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/query-truncateTable.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "schemaName": "lists",
+            "queryName": "People",
+            "transacted": true,
+            "auditBehavior": "NONE"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "command": "truncate",
+            "errors": [],
+            "queryName": "People",
+            "rows": [],
+            "rowsAffected": 0,
+            "schemaName": "lists"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client
+        .truncate_table(
+            TruncateTableOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .container_path("/Alt/Container".to_string())
+                .transacted(true)
+                .audit_behavior(AuditBehavior::None)
+                .build(),
+        )
+        .await
+        .expect("truncate table should succeed");
+
+    assert_eq!(result.command, "truncate");
+    assert_eq!(result.rows_affected, 0);
 }

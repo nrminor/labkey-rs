@@ -9,10 +9,11 @@
 use std::collections::HashMap;
 
 use base64::Engine;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     client::LabkeyClient,
+    common::AuditBehavior,
     error::LabkeyError,
     filter::{ContainerFilter, Filter, encode_filters},
 };
@@ -152,6 +153,30 @@ pub struct SelectRowsResponse {
     pub meta_data: Option<ResponseMetadata>,
 }
 
+/// Response from row mutation endpoints.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct ModifyRowsResults {
+    /// Command name returned by the server (for example, `"insert"`).
+    pub command: String,
+    /// Per-row or per-field errors returned by the server.
+    #[serde(default)]
+    pub errors: Vec<serde_json::Value>,
+    /// Optional field identifier associated with the error.
+    #[serde(default)]
+    pub field: Option<String>,
+    /// Query name included in the response.
+    pub query_name: String,
+    /// Returned row payloads in the same order as the request rows.
+    #[serde(default)]
+    pub rows: Vec<serde_json::Value>,
+    /// Number of affected rows.
+    pub rows_affected: i64,
+    /// Schema name included in the response.
+    pub schema_name: String,
+}
+
 /// Options for [`LabkeyClient::select_rows`].
 ///
 /// Only `schema_name` and `query_name` are required. All other fields
@@ -251,6 +276,108 @@ pub struct ExecuteSqlOptions {
     pub parameters: Option<HashMap<String, String>>,
 }
 
+/// Options for [`LabkeyClient::insert_rows`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct InsertRowsOptions {
+    /// The schema containing the target query.
+    pub schema_name: String,
+    /// The query or table name.
+    pub query_name: String,
+    /// Row payloads to insert.
+    pub rows: Vec<serde_json::Value>,
+    /// Override the client's default container path for this request.
+    pub container_path: Option<String>,
+    /// Whether all inserts should execute in a single transaction.
+    pub transacted: Option<bool>,
+    /// Optional extra context passed to server-side scripts.
+    pub extra_context: Option<serde_json::Value>,
+    /// Audit behavior override for this mutation.
+    pub audit_behavior: Option<AuditBehavior>,
+    /// Optional audit details to record.
+    pub audit_details: Option<serde_json::Value>,
+    /// Optional user comment for audit records.
+    pub audit_user_comment: Option<String>,
+    /// Whether the server can skip detailed row reselection.
+    pub skip_reselect_rows: Option<bool>,
+}
+
+/// Options for [`LabkeyClient::update_rows`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct UpdateRowsOptions {
+    /// The schema containing the target query.
+    pub schema_name: String,
+    /// The query or table name.
+    pub query_name: String,
+    /// Row payloads to update.
+    pub rows: Vec<serde_json::Value>,
+    /// Override the client's default container path for this request.
+    pub container_path: Option<String>,
+    /// Whether all updates should execute in a single transaction.
+    pub transacted: Option<bool>,
+    /// Optional extra context passed to server-side scripts.
+    pub extra_context: Option<serde_json::Value>,
+    /// Audit behavior override for this mutation.
+    pub audit_behavior: Option<AuditBehavior>,
+    /// Optional audit details to record.
+    pub audit_details: Option<serde_json::Value>,
+    /// Optional user comment for audit records.
+    pub audit_user_comment: Option<String>,
+    /// Whether the server can skip detailed row reselection.
+    pub skip_reselect_rows: Option<bool>,
+}
+
+/// Options for [`LabkeyClient::delete_rows`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct DeleteRowsOptions {
+    /// The schema containing the target query.
+    pub schema_name: String,
+    /// The query or table name.
+    pub query_name: String,
+    /// Row payloads identifying rows to delete.
+    pub rows: Vec<serde_json::Value>,
+    /// Override the client's default container path for this request.
+    pub container_path: Option<String>,
+    /// Whether all deletes should execute in a single transaction.
+    pub transacted: Option<bool>,
+    /// Optional extra context passed to server-side scripts.
+    pub extra_context: Option<serde_json::Value>,
+    /// Audit behavior override for this mutation.
+    pub audit_behavior: Option<AuditBehavior>,
+    /// Optional audit details to record.
+    pub audit_details: Option<serde_json::Value>,
+    /// Optional user comment for audit records.
+    pub audit_user_comment: Option<String>,
+    /// Whether the server can skip detailed row reselection.
+    pub skip_reselect_rows: Option<bool>,
+}
+
+/// Options for [`LabkeyClient::truncate_table`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct TruncateTableOptions {
+    /// The schema containing the target query.
+    pub schema_name: String,
+    /// The query or table name.
+    pub query_name: String,
+    /// Override the client's default container path for this request.
+    pub container_path: Option<String>,
+    /// Whether truncation should execute in a single transaction.
+    pub transacted: Option<bool>,
+    /// Optional extra context passed to server-side scripts.
+    pub extra_context: Option<serde_json::Value>,
+    /// Audit behavior override for this mutation.
+    pub audit_behavior: Option<AuditBehavior>,
+    /// Optional audit details to record.
+    pub audit_details: Option<serde_json::Value>,
+    /// Optional user comment for audit records.
+    pub audit_user_comment: Option<String>,
+    /// Whether the server can skip detailed row reselection.
+    pub skip_reselect_rows: Option<bool>,
+}
+
 /// Encode a string to avoid web application firewall false positives.
 ///
 /// `LabKey` endpoints that accept SQL or script content use this encoding to
@@ -283,7 +410,7 @@ fn opt<V: ToString>(key: impl Into<String>, value: Option<V>) -> Option<(String,
 
 /// JSON body for the `executeSql.api` endpoint. Using a struct with
 /// `skip_serializing_if` replaces the imperative `if let Some` pattern.
-#[derive(serde::Serialize)]
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ExecuteSqlBody {
     schema_name: String,
@@ -305,7 +432,39 @@ struct ExecuteSqlBody {
     include_style: Option<bool>,
 }
 
+/// Shared request body for query mutation endpoints.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MutateRowsBody {
+    schema_name: String,
+    query_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rows: Option<Vec<serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    transacted: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra_context: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    audit_behavior: Option<AuditBehavior>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    audit_details: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    audit_user_comment: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skip_reselect_rows: Option<bool>,
+}
+
 impl LabkeyClient {
+    async fn mutate_rows(
+        &self,
+        action: &str,
+        container_path: Option<String>,
+        body: &MutateRowsBody,
+    ) -> Result<ModifyRowsResults, LabkeyError> {
+        let url = self.build_url("query", action, container_path.as_deref());
+        self.post(url, body).await
+    }
+
     /// Select rows from a `LabKey` query.
     ///
     /// Sends a GET request to the `query-getQuery.api` endpoint with the
@@ -392,6 +551,225 @@ impl LabkeyClient {
         self.get(url, &params).await
     }
 
+    /// Insert rows into a query table.
+    ///
+    /// Sends a POST request to `query-insertRows.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the HTTP request fails, the server returns
+    /// an error response, or the response body cannot be deserialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::query::InsertRowsOptions;
+    ///
+    /// let result = client
+    ///     .insert_rows(
+    ///         InsertRowsOptions::builder()
+    ///             .schema_name("lists")
+    ///             .query_name("People")
+    ///             .rows(vec![serde_json::json!({"Name": "Alice"})])
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("Inserted {} rows", result.rows_affected);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn insert_rows(
+        &self,
+        options: InsertRowsOptions,
+    ) -> Result<ModifyRowsResults, LabkeyError> {
+        let body = MutateRowsBody {
+            schema_name: options.schema_name,
+            query_name: options.query_name,
+            rows: Some(options.rows),
+            transacted: options.transacted,
+            extra_context: options.extra_context,
+            audit_behavior: options.audit_behavior,
+            audit_details: options.audit_details,
+            audit_user_comment: options.audit_user_comment,
+            skip_reselect_rows: options.skip_reselect_rows,
+        };
+
+        self.mutate_rows("insertRows.api", options.container_path, &body)
+            .await
+    }
+
+    /// Update rows in a query table.
+    ///
+    /// Sends a POST request to `query-updateRows.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the HTTP request fails, the server returns
+    /// an error response, or the response body cannot be deserialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::query::UpdateRowsOptions;
+    ///
+    /// let result = client
+    ///     .update_rows(
+    ///         UpdateRowsOptions::builder()
+    ///             .schema_name("lists")
+    ///             .query_name("People")
+    ///             .rows(vec![serde_json::json!({"RowId": 1, "Name": "Alicia"})])
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("Updated {} rows", result.rows_affected);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn update_rows(
+        &self,
+        options: UpdateRowsOptions,
+    ) -> Result<ModifyRowsResults, LabkeyError> {
+        let body = MutateRowsBody {
+            schema_name: options.schema_name,
+            query_name: options.query_name,
+            rows: Some(options.rows),
+            transacted: options.transacted,
+            extra_context: options.extra_context,
+            audit_behavior: options.audit_behavior,
+            audit_details: options.audit_details,
+            audit_user_comment: options.audit_user_comment,
+            skip_reselect_rows: options.skip_reselect_rows,
+        };
+
+        self.mutate_rows("updateRows.api", options.container_path, &body)
+            .await
+    }
+
+    /// Delete rows from a query table.
+    ///
+    /// Sends a POST request to `query-deleteRows.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the HTTP request fails, the server returns
+    /// an error response, or the response body cannot be deserialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::query::DeleteRowsOptions;
+    ///
+    /// let result = client
+    ///     .delete_rows(
+    ///         DeleteRowsOptions::builder()
+    ///             .schema_name("lists")
+    ///             .query_name("People")
+    ///             .rows(vec![serde_json::json!({"RowId": 1})])
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("Deleted {} rows", result.rows_affected);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn delete_rows(
+        &self,
+        options: DeleteRowsOptions,
+    ) -> Result<ModifyRowsResults, LabkeyError> {
+        let body = MutateRowsBody {
+            schema_name: options.schema_name,
+            query_name: options.query_name,
+            rows: Some(options.rows),
+            transacted: options.transacted,
+            extra_context: options.extra_context,
+            audit_behavior: options.audit_behavior,
+            audit_details: options.audit_details,
+            audit_user_comment: options.audit_user_comment,
+            skip_reselect_rows: options.skip_reselect_rows,
+        };
+
+        self.mutate_rows("deleteRows.api", options.container_path, &body)
+            .await
+    }
+
+    /// Delete all rows in a query table.
+    ///
+    /// Sends a POST request to `query-truncateTable.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the HTTP request fails, the server returns
+    /// an error response, or the response body cannot be deserialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::query::TruncateTableOptions;
+    ///
+    /// let result = client
+    ///     .truncate_table(
+    ///         TruncateTableOptions::builder()
+    ///             .schema_name("lists")
+    ///             .query_name("People")
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("Rows affected: {}", result.rows_affected);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn truncate_table(
+        &self,
+        options: TruncateTableOptions,
+    ) -> Result<ModifyRowsResults, LabkeyError> {
+        let body = MutateRowsBody {
+            schema_name: options.schema_name,
+            query_name: options.query_name,
+            rows: None,
+            transacted: options.transacted,
+            extra_context: options.extra_context,
+            audit_behavior: options.audit_behavior,
+            audit_details: options.audit_details,
+            audit_user_comment: options.audit_user_comment,
+            skip_reselect_rows: options.skip_reselect_rows,
+        };
+
+        self.mutate_rows("truncateTable.api", options.container_path, &body)
+            .await
+    }
+
     /// Execute arbitrary `LabKey` SQL.
     ///
     /// Sends a POST request to the `query-executeSql.api` endpoint with the
@@ -472,6 +850,15 @@ mod tests {
     use base64::Engine;
 
     use super::*;
+
+    fn test_client(base_url: &str, container_path: &str) -> LabkeyClient {
+        LabkeyClient::new(crate::ClientConfig::new(
+            base_url,
+            crate::Credential::ApiKey("test-key".to_string()),
+            container_path,
+        ))
+        .expect("valid client config")
+    }
 
     const WAF_PREFIX: &str = "/*{{base64/x-www-form-urlencoded/wafText}}*/";
 
@@ -668,5 +1055,140 @@ mod tests {
         assert!(!col.mv_enabled);
         assert!(col.caption.is_none());
         assert!(col.json_type.is_none());
+    }
+
+    #[test]
+    fn mutation_endpoint_urls_match_expected_actions() {
+        let client = test_client("https://labkey.example.com/labkey", "/MyProject/MyFolder");
+
+        assert_eq!(
+            client
+                .build_url("query", "insertRows.api", Some("/Alt/Container"))
+                .as_str(),
+            "https://labkey.example.com/labkey/Alt/Container/query-insertRows.api"
+        );
+        assert_eq!(
+            client
+                .build_url("query", "updateRows.api", Some("/Alt/Container"))
+                .as_str(),
+            "https://labkey.example.com/labkey/Alt/Container/query-updateRows.api"
+        );
+        assert_eq!(
+            client
+                .build_url("query", "deleteRows.api", Some("/Alt/Container"))
+                .as_str(),
+            "https://labkey.example.com/labkey/Alt/Container/query-deleteRows.api"
+        );
+        assert_eq!(
+            client
+                .build_url("query", "truncateTable.api", Some("/Alt/Container"))
+                .as_str(),
+            "https://labkey.example.com/labkey/Alt/Container/query-truncateTable.api"
+        );
+    }
+
+    #[test]
+    fn mutate_rows_body_includes_required_and_omits_absent_optional_fields() {
+        let body = MutateRowsBody {
+            schema_name: "lists".to_string(),
+            query_name: "People".to_string(),
+            rows: Some(vec![serde_json::json!({"Name": "Alice"})]),
+            transacted: None,
+            extra_context: None,
+            audit_behavior: Some(AuditBehavior::Summary),
+            audit_details: None,
+            audit_user_comment: None,
+            skip_reselect_rows: None,
+        };
+
+        let value = serde_json::to_value(&body).expect("should serialize body");
+        let obj = value.as_object().expect("body should be object");
+
+        assert_eq!(obj.get("schemaName"), Some(&serde_json::json!("lists")));
+        assert_eq!(obj.get("queryName"), Some(&serde_json::json!("People")));
+        assert_eq!(
+            obj.get("rows"),
+            Some(&serde_json::json!([{"Name": "Alice"}]))
+        );
+        assert_eq!(
+            obj.get("auditBehavior"),
+            Some(&serde_json::json!("SUMMARY"))
+        );
+        assert!(!obj.contains_key("transacted"));
+        assert!(!obj.contains_key("extraContext"));
+        assert!(!obj.contains_key("auditDetails"));
+        assert!(!obj.contains_key("auditUserComment"));
+        assert!(!obj.contains_key("skipReselectRows"));
+    }
+
+    #[test]
+    fn truncate_mutate_rows_body_omits_rows() {
+        let body = MutateRowsBody {
+            schema_name: "lists".to_string(),
+            query_name: "People".to_string(),
+            rows: None,
+            transacted: Some(true),
+            extra_context: None,
+            audit_behavior: Some(AuditBehavior::Detailed),
+            audit_details: Some(serde_json::json!({"reason": "cleanup"})),
+            audit_user_comment: Some("Maintenance".to_string()),
+            skip_reselect_rows: Some(true),
+        };
+
+        let value = serde_json::to_value(&body).expect("should serialize body");
+        let obj = value.as_object().expect("body should be object");
+
+        assert!(!obj.contains_key("rows"));
+        assert_eq!(obj.get("transacted"), Some(&serde_json::json!(true)));
+        assert_eq!(
+            obj.get("auditBehavior"),
+            Some(&serde_json::json!("DETAILED"))
+        );
+        assert_eq!(
+            obj.get("auditDetails"),
+            Some(&serde_json::json!({"reason": "cleanup"}))
+        );
+        assert_eq!(
+            obj.get("auditUserComment"),
+            Some(&serde_json::json!("Maintenance"))
+        );
+        assert_eq!(obj.get("skipReselectRows"), Some(&serde_json::json!(true)));
+    }
+
+    #[test]
+    fn modify_rows_results_deserializes_happy_path() {
+        let json = serde_json::json!({
+            "command": "insert",
+            "errors": [],
+            "queryName": "People",
+            "rows": [{"RowId": 42, "Name": "Alice"}],
+            "rowsAffected": 1,
+            "schemaName": "lists"
+        });
+
+        let result: ModifyRowsResults = serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(result.command, "insert");
+        assert_eq!(result.query_name, "People");
+        assert_eq!(result.rows_affected, 1);
+        assert_eq!(result.schema_name, "lists");
+        assert_eq!(result.rows.len(), 1);
+        assert!(result.errors.is_empty());
+    }
+
+    #[test]
+    fn modify_rows_results_deserializes_minimal_with_zero_rows_affected() {
+        let json = serde_json::json!({
+            "command": "truncate",
+            "queryName": "People",
+            "rowsAffected": 0,
+            "schemaName": "lists"
+        });
+
+        let result: ModifyRowsResults = serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(result.command, "truncate");
+        assert_eq!(result.rows_affected, 0);
+        assert!(result.rows.is_empty());
+        assert!(result.errors.is_empty());
+        assert!(result.field.is_none());
     }
 }

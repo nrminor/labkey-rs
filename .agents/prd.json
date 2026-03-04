@@ -78,8 +78,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented the core query mutation endpoint set in src/query.rs by adding non-exhaustive builder options for insert_rows, update_rows, delete_rows, and truncate_table along with a non-exhaustive ModifyRowsResults response model using camelCase serde mapping. Added internal typed MutateRowsBody request shaping with skip_serializing_if on optional fields so required keys are emitted per endpoint and optional keys are omitted when unset, with AuditBehavior wired to NONE/SUMMARY/DETAILED values. Added shared internal mutate_rows transport helper and public endpoint methods with container_path override support plus rustdocs including # Errors and no_run # Example sections. Expanded tests with unit coverage for mutation URL routing, body serialization contracts (including truncate omitting rows), AuditBehavior wire values, and ModifyRowsResults happy/minimal deserialization including zero rowsAffected, plus integration coverage for each endpoint verifying URL/action, container override forwarding, strict JSON body shape, and empty rows edge behavior. Verified all quality gates with just check before and after review feedback updates."
     },
     {
       "id": "US-005",
