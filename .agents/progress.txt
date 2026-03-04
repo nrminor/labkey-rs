@@ -1,0 +1,4 @@
+# Agent Progress Log
+# Each agent session appends notes here for continuity across context windows.
+# ============================================================================
+

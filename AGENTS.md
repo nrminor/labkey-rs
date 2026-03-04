@@ -1,0 +1,193 @@
+# Agent Instructions for labkey-rs
+
+This document defines mandatory conventions for AI agents working on this project. Violations of these rules will result in failed commits and wasted iterations.
+
+## Project Overview
+
+**labkey-rs** is an unofficial Rust client for the LabKey Server REST API, ported from the official `@labkey/api` JavaScript/TypeScript client (v1.48.0, Apache-2.0). It provides typed, async access to LabKey's HTTP endpoints for query, security, domain, experiment, and other modules.
+
+**Architecture**: A single library crate. A `LabkeyClient` struct holds a `reqwest::Client`, base URL, container path, and auth credentials. Each API module's functions are async methods on the client that return `Result<T, LabkeyError>`.
+
+**Reference material**: The upstream JS client is cloned into `.agents/repos/labkey-api-js/` (run `just setup` if missing). The feasibility assessment is at `.agents/RESEARCH.md`.
+
+## Before You Do Anything
+
+1. **Ensure resources exist.** Check that `.agents/repos/labkey-api-js/` contains the reference JS client. If missing, run `just setup` to clone it.
+2. **Read `.agents/RESEARCH.md`** to understand the JS client architecture, what to port, what to drop, and the recommended implementation order.
+3. **Read the justfile.** Run `just --list` to see available recipes. You must use these recipes for all repeating commands.
+4. **Read `.agents/prd.json`** (if it exists) to find the current user story you should implement.
+5. **Understand the project structure.** Read the relevant module files for your task.
+
+## Version Control: jj (Jujutsu)
+
+This project uses `jj` with the git backend, not raw git.
+
+### Critical: jj Bypasses Git Hooks
+
+jj does not trigger git hooks. The justfile is our enforcement mechanism. You must run checks manually:
+
+```bash
+just check          # Required before every commit
+just prepare-commit # Runs checks, then shows jj status
+```
+
+### Commit Workflow - _the reverse of git_
+
+1. Declare intent for the current commit with `jj describe`. Remember in `jj`, all changes in tracked are already in a commit--there is no index. All revisions in the current working copy will be in this commit.
+2. Make your changes.
+3. Run `just check` — all checks must pass
+4. Verify that your commit description is still accurate and update it if need be.
+5. If the commit is finished and all checks pass, move to a new clean commit for the next session with `jj new`
+
+### Commit Message Format
+
+```text
+Brief summary of what changed (one line)
+
+Longer description in prose. Write in complete sentences. Do NOT hard-wrap lines at 72 or 80 characters — let the text flow naturally and allow the viewer to wrap it. Keep it simple and readable. Avoid bullets, headings, and other formatting that looks LLM-generated. Explain the why, not just the what.
+```
+
+**Important:** Do not insert manual line breaks in the commit body. Write each paragraph as a single long line. Git tools and viewers will wrap the text appropriately.
+
+### Commit Size
+
+Each commit should capture one complete feature or fix. Commits should be:
+
+- Self-contained and functional
+- Bisect-friendly (the project should build and pass tests at every commit)
+- Aligned with a single PRD user story when using Ralph loops
+
+## Quality Gates
+
+### Pre-commit Checks (Mandatory)
+
+Before every commit, run:
+
+```bash
+just check
+```
+
+This runs:
+
+1. `cargo fmt --check` — formatting must be correct
+2. `cargo clippy -- -D warnings` — no warnings allowed
+3. `cargo nextest run` — all tests must pass
+4. `cargo doc` — documentation must build without errors
+
+If any check fails, fix the issues before committing. Do not skip checks.
+
+### Documentation Requirements
+
+Documentation must build successfully for a commit to be considered valid. Run `just doc-check` to verify.
+
+**Doctests are preferred.** When writing documentation examples:
+
+- **Prefer runnable examples** — examples that compile and run are the gold standard
+- **Use `no_run` over `ignore`** — if an example can't run (e.g., requires a LabKey server), use `no_run` so it still gets type-checked
+- **`ignore` is a last resort** — only use `ignore` when the code genuinely cannot be compiled (e.g., pseudocode, incomplete snippets)
+
+The goal is maximum compiler verification. Every doctest that compiles is a test that catches breakage.
+
+### Clippy and `#[allow(...)]` Policy
+
+This project uses stringent clippy lints (pedantic, perf, style, complexity, correctness). Warnings are denied.
+
+**`#[allow(...)]` is treated like `unsafe`.** It requires:
+
+1. A justification comment explaining why the allow is necessary
+2. A `TODO(cleanup)` tag if the allow is temporary
+3. Case-by-case approval — no blanket module-level allows in production code
+
+## File Tracking: Deny-by-Default .gitignore
+
+The `.gitignore` ignores everything by default (`*`). Files are only tracked if explicitly allowed.
+
+**To track a new file:**
+
+1. Add it to `.gitignore` with a `!` prefix
+2. Place it in the appropriate section
+
+No glob patterns. Every tracked path must be explicit.
+
+## Commands: Use the Justfile
+
+Never run raw cargo commands for standard operations. Use justfile recipes:
+
+| Task              | Command               |
+| ----------------- | --------------------- |
+| Run all checks    | `just check`          |
+| Format code       | `just fmt`            |
+| Check formatting  | `just fmt-check`      |
+| Run clippy        | `just lint`           |
+| Run tests         | `just test`           |
+| Check docs build  | `just doc-check`      |
+| Build debug       | `just build`          |
+| Build release     | `just build-release`  |
+| Prepare to commit | `just prepare-commit` |
+| Prepare to push   | `just prepare-push`   |
+
+Run `just --list` to see all available recipes.
+
+## Prohibited Actions
+
+Agents must never:
+
+1. **Run `cargo install`** — Package installation is the user's responsibility
+2. **Run `jj git push`** — Pushing is the user's responsibility
+3. **Skip pre-commit checks** — Always run `just check` before committing
+4. **Use blanket `#[allow(...)]`** — Each allow needs justification
+5. **Add glob patterns to .gitignore** — Use explicit paths only
+6. **Create documentation files** unless explicitly requested
+7. **Modify Cargo.toml dependency versions** without using `cargo add`
+
+## Ralph Loop Protocol
+
+When working in Ralph loops (autonomous agent iterations):
+
+1. **Read `.agents/prd.json`** to find the first story where `passes: false`
+2. **Implement only that story** — do not look ahead or implement multiple stories
+3. **Verify all acceptance criteria** before marking complete
+4. **Run `just check`** — all checks must pass
+5. **Commit with message** referencing the story: `US-XXX: Brief description`
+6. **Update `.agents/prd.json`** — set `passes: true` and add notes if needed
+
+### Story Completion Checklist
+
+Before marking a story as complete:
+
+- [ ] All acceptance criteria verified
+- [ ] `just check` passes (fmt + clippy + tests)
+- [ ] Changes committed with proper message
+- [ ] No unrelated changes included
+- [ ] New files added to `.gitignore` allow list
+
+### If a Story Is Too Large
+
+If a story cannot be completed in one iteration:
+
+1. Implement as much as possible
+2. Add a note to the story's `notes` field explaining what remains
+3. Do not mark `passes: true`
+4. The next iteration will continue the work
+
+## Error Handling Conventions
+
+- Use `thiserror` for defining error types in library code
+- Propagate errors with `?` and add context where helpful
+- Never use `.unwrap()` or `.expect()` in library code without justification
+
+## Testing Conventions
+
+- Unit tests go in the same file as the code they test (inline `#[cfg(test)]` modules)
+- Integration tests go in `tests/`
+- All tests must pass before committing
+
+## Getting Help
+
+If you're unsure about a convention or encounter an ambiguous situation:
+
+1. Check this document first
+2. Look at existing code for patterns
+3. Ask the user for clarification rather than guessing
+
+**For documentation or research needs:** Delegate to `@documentation-nerd` rather than asking the user. This includes questions about external tools, libraries, APIs, or anything that requires looking up documentation. The user should not be your search engine.

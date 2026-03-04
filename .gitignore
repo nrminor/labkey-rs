@@ -1,0 +1,31 @@
+# Deny-by-default: ignore everything, explicitly allow tracked files.
+# All file tracking is intentional. No glob patterns allowed.
+*
+
+# === Allowed: Project configuration ===
+!/.gitignore
+!/Cargo.toml
+!/Cargo.lock
+!/justfile
+!/AGENTS.md
+!/opencode.json
+!/README.md
+!/LICENSE-MIT
+!/LICENSE-APACHE
+
+# === Allowed: Agent configuration ===
+!/.agents
+!/.agents/prd.json
+!/.agents/progress.txt
+!/.agents/PROMPT.md
+!/.agents/RESEARCH.md
+!/.agents/PLAN.md
+
+# === Allowed: Source code ===
+!/src
+!/src/lib.rs
+
+# === Allowed: GitHub workflows ===
+!/.github
+!/.github/workflows
+!/.github/workflows/ci.yml
