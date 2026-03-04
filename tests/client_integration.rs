@@ -10,9 +10,10 @@ use labkey_rs::filter::Filter;
 use labkey_rs::query::{
     CommandType, DataViewType, DeleteQueryViewOptions, DeleteRowsOptions, ExecuteSqlOptions,
     GetDataViewsOptions, GetQueriesOptions, GetQueryDetailsOptions, GetQueryViewsOptions,
-    GetSchemasOptions, InsertRowsOptions, MoveRowsOptions, SaveQueryViewsOptions, SaveRowsCommand,
-    SaveRowsOptions, SaveSessionViewOptions, SelectDistinctOptions, SelectRowsOptions,
-    TruncateTableOptions, UpdateRowsOptions, ValidateQueryOptions,
+    GetSchemasOptions, ImportDataOptions, ImportDataSource, InsertOption, InsertRowsOptions,
+    MoveRowsOptions, SaveQueryViewsOptions, SaveRowsCommand, SaveRowsOptions,
+    SaveSessionViewOptions, SelectDistinctOptions, SelectRowsOptions, TruncateTableOptions,
+    UpdateRowsOptions, ValidateQueryOptions,
 };
 use url::Url;
 use wiremock::matchers::{
@@ -1050,6 +1051,295 @@ async fn multipart_helper_sends_form_parts() {
         .expect("multipart request should succeed");
 
     assert_eq!(response.get("ok"), Some(&serde_json::Value::Bool(true)));
+}
+
+#[tokio::test]
+async fn import_data_sends_text_source_and_optional_fields() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/query-import.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(header_exists("content-type"))
+        .and(body_string_contains("name=\"schemaName\""))
+        .and(body_string_contains("lists"))
+        .and(body_string_contains("name=\"queryName\""))
+        .and(body_string_contains("People"))
+        .and(body_string_contains("name=\"text\""))
+        .and(body_string_contains("Name,Age"))
+        .and(body_string_contains("name=\"format\""))
+        .and(body_string_contains("csv"))
+        .and(body_string_contains("name=\"insertOption\""))
+        .and(body_string_contains("IMPORT"))
+        .and(body_string_contains("name=\"useAsync\""))
+        .and(body_string_contains("\r\ntrue\r\n"))
+        .and(body_string_contains("name=\"saveToPipeline\""))
+        .and(body_string_contains("\r\nfalse\r\n"))
+        .and(body_string_contains("name=\"importIdentity\""))
+        .and(body_string_contains(
+            "name=\"importIdentity\"\r\n\r\ntrue\r\n",
+        ))
+        .and(body_string_contains("name=\"importLookupByAlternateKey\""))
+        .and(body_string_contains(
+            "name=\"importLookupByAlternateKey\"\r\n\r\nfalse\r\n",
+        ))
+        .and(body_string_contains("name=\"auditUserComment\""))
+        .and(body_string_contains("bulk text import"))
+        .and(body_string_contains("name=\"auditDetails\""))
+        .and(body_string_contains("\"source\":\"integration-test\""))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true,
+            "rowCount": 1
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .import_data(
+            ImportDataOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .source(ImportDataSource::Text("Name,Age\nAlice,30".to_string()))
+                .container_path("/Alt/Container".to_string())
+                .format("csv".to_string())
+                .insert_option(InsertOption::Import)
+                .use_async(true)
+                .save_to_pipeline(false)
+                .import_identity(true)
+                .import_lookup_by_alternate_key(false)
+                .audit_user_comment("bulk text import".to_string())
+                .audit_details(serde_json::json!({"source": "integration-test"}))
+                .build(),
+        )
+        .await
+        .expect("import data should succeed");
+
+    assert!(response.success);
+    assert_eq!(response.row_count, 1);
+    assert!(response.job_id.is_none());
+}
+
+#[tokio::test]
+async fn import_data_sends_file_source() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/query-import.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(header_exists("content-type"))
+        .and(body_string_contains("name=\"schemaName\""))
+        .and(body_string_contains("lists"))
+        .and(body_string_contains("name=\"queryName\""))
+        .and(body_string_contains("People"))
+        .and(body_string_contains("name=\"file\"; filename=\"rows.csv\""))
+        .and(body_string_contains("Name,Age"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true,
+            "rowCount": 1,
+            "jobId": "job-42"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .import_data(
+            ImportDataOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .container_path("/Alt/Container".to_string())
+                .source(ImportDataSource::File {
+                    file_name: "rows.csv".to_string(),
+                    bytes: b"Name,Age\nAlice,30".to_vec(),
+                    mime_type: Some("text/csv".to_string()),
+                })
+                .build(),
+        )
+        .await
+        .expect("file import should succeed");
+
+    assert!(response.success);
+    assert_eq!(response.row_count, 1);
+    assert_eq!(response.job_id.as_deref(), Some("job-42"));
+}
+
+#[tokio::test]
+async fn import_data_sends_path_source() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/query-import.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_string_contains("name=\"schemaName\""))
+        .and(body_string_contains("lists"))
+        .and(body_string_contains("name=\"queryName\""))
+        .and(body_string_contains("People"))
+        .and(body_string_contains("name=\"path\""))
+        .and(body_string_contains("/files/import/rows.tsv"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true,
+            "rowCount": 5
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .import_data(
+            ImportDataOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .container_path("/Alt/Container".to_string())
+                .source(ImportDataSource::Path("/files/import/rows.tsv".to_string()))
+                .build(),
+        )
+        .await
+        .expect("path import should succeed");
+
+    assert!(response.success);
+    assert_eq!(response.row_count, 5);
+}
+
+#[tokio::test]
+async fn import_data_sends_module_resource_source() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/query-import.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_string_contains("name=\"schemaName\""))
+        .and(body_string_contains("lists"))
+        .and(body_string_contains("name=\"queryName\""))
+        .and(body_string_contains("People"))
+        .and(body_string_contains("name=\"module\""))
+        .and(body_string_contains("biologics"))
+        .and(body_string_contains("name=\"moduleResource\""))
+        .and(body_string_contains("data/test/lists/Vessel.tsv"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true,
+            "rowCount": 3
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .import_data(
+            ImportDataOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .container_path("/Alt/Container".to_string())
+                .source(ImportDataSource::ModuleResource {
+                    module: "biologics".to_string(),
+                    module_resource: "data/test/lists/Vessel.tsv".to_string(),
+                })
+                .build(),
+        )
+        .await
+        .expect("module resource import should succeed");
+
+    assert!(response.success);
+    assert_eq!(response.row_count, 3);
+}
+
+#[tokio::test]
+async fn import_data_sends_merge_insert_option_wire_value() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/query-import.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_string_contains("name=\"insertOption\""))
+        .and(body_string_contains("MERGE"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true,
+            "rowCount": 2
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .import_data(
+            ImportDataOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .container_path("/Alt/Container".to_string())
+                .source(ImportDataSource::Text("Name,Age\nBob,31".to_string()))
+                .insert_option(InsertOption::Merge)
+                .build(),
+        )
+        .await
+        .expect("merge import should succeed");
+
+    assert!(response.success);
+    assert_eq!(response.row_count, 2);
+}
+
+#[tokio::test]
+async fn import_data_json_error_maps_to_api_error() {
+    let server = MockServer::start().await;
+    let error_body: serde_json::Value = fixture("api_error.json");
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/query-import.api"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(error_body))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client
+        .import_data(
+            ImportDataOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .source(ImportDataSource::Text("Name\nAlice".to_string()))
+                .build(),
+        )
+        .await;
+
+    match result {
+        Err(LabkeyError::Api { status, .. }) => {
+            assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
+        }
+        other => panic!("expected LabkeyError::Api, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn import_data_non_json_error_maps_to_unexpected_response() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/query-import.api"))
+        .respond_with(ResponseTemplate::new(502).set_body_string("import service unavailable"))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client
+        .import_data(
+            ImportDataOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .source(ImportDataSource::Text("Name\nAlice".to_string()))
+                .build(),
+        )
+        .await;
+
+    match result {
+        Err(LabkeyError::UnexpectedResponse { status, text }) => {
+            assert_eq!(status, reqwest::StatusCode::BAD_GATEWAY);
+            assert_eq!(text, "import service unavailable");
+        }
+        other => panic!("expected LabkeyError::UnexpectedResponse, got {other:?}"),
+    }
 }
 
 #[tokio::test]

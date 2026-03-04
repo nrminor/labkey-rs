@@ -688,6 +688,88 @@ pub struct GetServerDateResponse {
     pub date: String,
 }
 
+/// Insert strategy used by [`LabkeyClient::import_data`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum InsertOption {
+    /// Import new rows only.
+    #[serde(rename = "IMPORT")]
+    Import,
+    /// Import rows and merge updates when supported by the target table.
+    #[serde(rename = "MERGE")]
+    Merge,
+}
+
+/// Data source variants accepted by [`LabkeyClient::import_data`].
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum ImportDataSource {
+    /// Inline delimited text payload (for example, CSV or TSV content).
+    Text(String),
+    /// Upload file bytes as a multipart `file` part.
+    File {
+        /// Filename sent for the multipart file part.
+        file_name: String,
+        /// Raw file bytes uploaded to the server.
+        bytes: Vec<u8>,
+        /// Optional MIME type for the file part.
+        mime_type: Option<String>,
+    },
+    /// Server-relative path from the webdav root.
+    Path(String),
+    /// Module resource source requiring both module and resource path.
+    ModuleResource {
+        /// Module name that owns the resource.
+        module: String,
+        /// Resource path inside the module.
+        module_resource: String,
+    },
+}
+
+/// Options for [`LabkeyClient::import_data`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct ImportDataOptions {
+    /// The schema containing the target query.
+    pub schema_name: String,
+    /// The query or table name.
+    pub query_name: String,
+    /// Exactly one import payload source.
+    pub source: ImportDataSource,
+    /// Override the client's default container path for this request.
+    pub container_path: Option<String>,
+    /// Explicit format hint (for example, `csv` or `tsv`).
+    pub format: Option<String>,
+    /// Insert behavior override.
+    pub insert_option: Option<InsertOption>,
+    /// Queue the import as an asynchronous pipeline job.
+    pub use_async: Option<bool>,
+    /// Save uploaded files to pipeline root.
+    pub save_to_pipeline: Option<bool>,
+    /// Use import identity behavior when supported by the target table.
+    pub import_identity: Option<bool>,
+    /// Match lookup rows using alternate key columns.
+    pub import_lookup_by_alternate_key: Option<bool>,
+    /// Optional user comment attached to import audit records.
+    pub audit_user_comment: Option<String>,
+    /// Optional structured details attached to import audit records.
+    pub audit_details: Option<serde_json::Value>,
+}
+
+/// Response from [`LabkeyClient::import_data`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct ImportDataResponse {
+    /// Whether the import request was accepted by the server.
+    pub success: bool,
+    /// Number of rows imported when available.
+    pub row_count: i64,
+    /// Pipeline job id for asynchronous imports.
+    #[serde(default)]
+    pub job_id: Option<String>,
+}
+
 /// Options for [`LabkeyClient::get_query_views`].
 #[derive(Debug, Clone, bon::Builder)]
 #[non_exhaustive]
@@ -1137,6 +1219,13 @@ fn container_filter_to_string(cf: ContainerFilter) -> String {
 /// Shorthand for building an optional query parameter pair.
 fn opt<V: ToString>(key: impl Into<String>, value: Option<V>) -> Option<(String, String)> {
     value.map(|v| (key.into(), v.to_string()))
+}
+
+fn insert_option_to_string(insert_option: InsertOption) -> &'static str {
+    match insert_option {
+        InsertOption::Import => "IMPORT",
+        InsertOption::Merge => "MERGE",
+    }
 }
 
 /// Convert a value to a SQL string literal with escaped single quotes.
@@ -2407,6 +2496,123 @@ impl LabkeyClient {
         self.post(url, &body).await
     }
 
+    /// Import query data from text, uploaded file bytes, server path, or module resource.
+    ///
+    /// Sends a multipart POST request to `query-import.api` with required
+    /// `schemaName` and `queryName` parts plus source-specific multipart parts.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the HTTP request fails, the server returns
+    /// an error response, the response body cannot be deserialized, or a
+    /// provided file MIME type is invalid.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::query::{ImportDataOptions, ImportDataSource, InsertOption};
+    ///
+    /// let response = client
+    ///     .import_data(
+    ///         ImportDataOptions::builder()
+    ///             .schema_name("lists".to_string())
+    ///             .query_name("People".to_string())
+    ///             .source(ImportDataSource::Text("Name,Age\nAlice,30".to_string()))
+    ///             .format("csv".to_string())
+    ///             .insert_option(InsertOption::Import)
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("Import success: {}", response.success);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn import_data(
+        &self,
+        options: ImportDataOptions,
+    ) -> Result<ImportDataResponse, LabkeyError> {
+        let url = self.build_url("query", "import.api", options.container_path.as_deref());
+        let mut form = reqwest::multipart::Form::new()
+            .text("schemaName", options.schema_name)
+            .text("queryName", options.query_name);
+
+        match options.source {
+            ImportDataSource::Text(text) => {
+                form = form.text("text", text);
+            }
+            ImportDataSource::File {
+                file_name,
+                bytes,
+                mime_type,
+            } => {
+                let part = reqwest::multipart::Part::bytes(bytes).file_name(file_name);
+                let part = if let Some(mime_type) = mime_type {
+                    part.mime_str(&mime_type).map_err(|error| {
+                        LabkeyError::InvalidInput(format!(
+                            "invalid MIME type for import data file part: {error}"
+                        ))
+                    })?
+                } else {
+                    part
+                };
+                form = form.part("file", part);
+            }
+            ImportDataSource::Path(path) => {
+                form = form.text("path", path);
+            }
+            ImportDataSource::ModuleResource {
+                module,
+                module_resource,
+            } => {
+                form = form
+                    .text("module", module)
+                    .text("moduleResource", module_resource);
+            }
+        }
+
+        if let Some(format) = options.format {
+            form = form.text("format", format);
+        }
+        if let Some(insert_option) = options.insert_option {
+            form = form.text(
+                "insertOption",
+                insert_option_to_string(insert_option).to_string(),
+            );
+        }
+        if let Some(use_async) = options.use_async {
+            form = form.text("useAsync", use_async.to_string());
+        }
+        if let Some(save_to_pipeline) = options.save_to_pipeline {
+            form = form.text("saveToPipeline", save_to_pipeline.to_string());
+        }
+        if let Some(import_identity) = options.import_identity {
+            form = form.text("importIdentity", import_identity.to_string());
+        }
+        if let Some(import_lookup_by_alternate_key) = options.import_lookup_by_alternate_key {
+            form = form.text(
+                "importLookupByAlternateKey",
+                import_lookup_by_alternate_key.to_string(),
+            );
+        }
+        if let Some(audit_user_comment) = options.audit_user_comment {
+            form = form.text("auditUserComment", audit_user_comment);
+        }
+        if let Some(audit_details) = options.audit_details {
+            form = form.text("auditDetails", audit_details.to_string());
+        }
+
+        self.post_multipart(url, form, &crate::client::RequestOptions::default())
+            .await
+    }
+
     /// Execute arbitrary `LabKey` SQL.
     ///
     /// Sends a POST request to the `query-executeSql.api` endpoint with the
@@ -2936,6 +3142,12 @@ mod tests {
                 .as_str(),
             "https://labkey.example.com/labkey/Alt/Container/query-saveRows.api"
         );
+        assert_eq!(
+            client
+                .build_url("query", "import.api", Some("/Alt/Container"))
+                .as_str(),
+            "https://labkey.example.com/labkey/Alt/Container/query-import.api"
+        );
     }
 
     #[test]
@@ -3076,6 +3288,100 @@ mod tests {
     #[test]
     fn data_view_type_variant_count_regression() {
         assert_eq!(data_view_type_variant_count(DataViewType::Datasets), 3);
+    }
+
+    #[test]
+    fn insert_option_serializes_exact_wire_values() {
+        assert_eq!(
+            serde_json::to_string(&InsertOption::Import).expect("should serialize"),
+            "\"IMPORT\""
+        );
+        assert_eq!(
+            serde_json::to_string(&InsertOption::Merge).expect("should serialize"),
+            "\"MERGE\""
+        );
+    }
+
+    #[test]
+    fn insert_option_deserializes_exact_wire_values() {
+        let import: InsertOption = serde_json::from_str("\"IMPORT\"").expect("should deserialize");
+        let merge: InsertOption = serde_json::from_str("\"MERGE\"").expect("should deserialize");
+
+        assert_eq!(import, InsertOption::Import);
+        assert_eq!(merge, InsertOption::Merge);
+    }
+
+    #[test]
+    fn insert_option_rejects_unknown_wire_value() {
+        let err = serde_json::from_str::<InsertOption>("\"UPSERT\"")
+            .expect_err("unknown insert option should fail to deserialize");
+        assert!(err.is_data());
+    }
+
+    fn insert_option_variant_count(value: InsertOption) -> usize {
+        match value {
+            InsertOption::Import | InsertOption::Merge => 2,
+        }
+    }
+
+    #[test]
+    fn insert_option_variant_count_regression() {
+        assert_eq!(insert_option_variant_count(InsertOption::Import), 2);
+    }
+
+    #[test]
+    fn import_data_response_deserializes_with_job_id() {
+        let json = serde_json::json!({
+            "success": true,
+            "rowCount": 4,
+            "jobId": "job-123"
+        });
+
+        let response: ImportDataResponse =
+            serde_json::from_value(json).expect("should deserialize");
+        assert!(response.success);
+        assert_eq!(response.row_count, 4);
+        assert_eq!(response.job_id.as_deref(), Some("job-123"));
+    }
+
+    #[test]
+    fn import_data_response_deserializes_without_job_id() {
+        let json = serde_json::json!({
+            "success": true,
+            "rowCount": 2
+        });
+
+        let response: ImportDataResponse =
+            serde_json::from_value(json).expect("should deserialize");
+        assert!(response.success);
+        assert_eq!(response.row_count, 2);
+        assert!(response.job_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn import_data_rejects_invalid_file_mime_type() {
+        let client = test_client("https://labkey.example.com/labkey", "/MyProject/MyFolder");
+
+        let result = client
+            .import_data(
+                ImportDataOptions::builder()
+                    .schema_name("lists".to_string())
+                    .query_name("People".to_string())
+                    .source(ImportDataSource::File {
+                        file_name: "rows.csv".to_string(),
+                        bytes: b"Name,Age\nAlice,30".to_vec(),
+                        mime_type: Some("not/a valid mime type".to_string()),
+                    })
+                    .build(),
+            )
+            .await;
+
+        match result {
+            Err(LabkeyError::InvalidInput(message)) => {
+                assert!(message.contains("invalid MIME type for import data file part"));
+            }
+            other => panic!("expected LabkeyError::InvalidInput, got {other:?}"),
+        }
     }
 
     #[test]

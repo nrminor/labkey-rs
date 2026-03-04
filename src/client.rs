@@ -267,8 +267,6 @@ impl LabkeyClient {
     }
 
     /// Send a multipart/form-data POST request and deserialize the JSON response.
-    // TODO(cleanup): Remove this allow when multipart endpoints start using this method.
-    #[allow(dead_code)] // Forward-compatible plumbing before multipart endpoint implementation.
     pub(crate) async fn post_multipart<T: serde::de::DeserializeOwned>(
         &self,
         url: Url,

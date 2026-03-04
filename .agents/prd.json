@@ -193,8 +193,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented typed query import_data multipart support in src/query.rs with new ImportDataOptions, ImportDataSource, InsertOption, and ImportDataResponse using required non-exhaustive and derive conventions. Added LabkeyClient::import_data targeting query-import.api via post_multipart with required schemaName/queryName fields and source-specific multipart wiring for text, file bytes, path, and module-resource modes (including module + moduleResource pair semantics). Added optional multipart fields with omission-by-default behavior for format, insertOption, useAsync, saveToPipeline, importIdentity, importLookupByAlternateKey, plus auditUserComment/auditDetails passthrough for parity with upstream clients. Added InsertOption serde wire round-trip and variant-count regression tests, ImportDataResponse deserialization tests with and without jobId, import URL regression coverage, and invalid MIME-type InvalidInput coverage. Expanded integration tests to verify multipart construction for all ImportDataSource variants, required field presence, insertOption MERGE wire value, optional field wiring, and endpoint-specific error mapping (JSON API errors and non-JSON unexpected responses). Removed obsolete dead_code allow on client multipart transport after endpoint adoption. Solicited feedback from nick-isms/testing-guru/semver-nag, addressed review items, and verified all gates with just check before and after feedback changes." 
     },
     {
       "id": "US-011",
