@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 
 use base64::Engine;
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -17,6 +18,9 @@ use crate::{
     error::LabkeyError,
     filter::{ContainerFilter, Filter, encode_filters},
 };
+
+/// Prefix used by `LabKey` for URL-valued hidden columns.
+pub const URL_COLUMN_PREFIX: &str = "_labkeyurl_";
 
 /// A cell value in a query response row.
 ///
@@ -620,6 +624,70 @@ pub struct GetSchemasOptions {
     pub schema_name: Option<String>,
 }
 
+/// Data view categories supported by [`LabkeyClient::get_data_views`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum DataViewType {
+    /// Include dataset-backed data views.
+    #[serde(rename = "datasets")]
+    Datasets,
+    /// Include query-backed data views.
+    #[serde(rename = "queries")]
+    Queries,
+    /// Include report-backed data views.
+    #[serde(rename = "reports")]
+    Reports,
+}
+
+/// Options for [`LabkeyClient::get_data_views`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct GetDataViewsOptions {
+    /// Override the client's default container path for this request.
+    pub container_path: Option<String>,
+    /// Restrict the browse-data response to one or more data-view categories.
+    pub data_types: Option<Vec<DataViewType>>,
+}
+
+/// Options for [`LabkeyClient::validate_query`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct ValidateQueryOptions {
+    /// Override the client's default container path for this request.
+    pub container_path: Option<String>,
+    /// Schema containing the query to validate.
+    pub schema_name: Option<String>,
+    /// Query name to validate.
+    pub query_name: Option<String>,
+    /// Optional SQL payload to validate.
+    pub sql: Option<String>,
+    /// Optional saved view name to include in validation.
+    pub view_name: Option<String>,
+    /// Validate query metadata and custom views in addition to parse/execute.
+    pub validate_query_metadata: Option<bool>,
+}
+
+/// Response from [`LabkeyClient::validate_query`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct ValidateQueryResponse {
+    /// Indicates whether the query validated successfully.
+    pub valid: bool,
+    /// Additional server-provided response fields.
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
+
+/// Response from [`LabkeyClient::get_server_date`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct GetServerDateResponse {
+    /// Server-local current date/time value.
+    pub date: String,
+}
+
 /// Options for [`LabkeyClient::get_query_views`].
 #[derive(Debug, Clone, bon::Builder)]
 #[non_exhaustive]
@@ -1071,6 +1139,39 @@ fn opt<V: ToString>(key: impl Into<String>, value: Option<V>) -> Option<(String,
     value.map(|v| (key.into(), v.to_string()))
 }
 
+/// Convert a value to a SQL string literal with escaped single quotes.
+///
+/// Empty strings return `NULL`.
+#[must_use]
+pub fn sql_string_literal(value: &str) -> String {
+    if value.is_empty() {
+        return "NULL".to_string();
+    }
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+/// Convert a date-like value to a `LabKey` SQL date literal.
+///
+/// Empty strings return `NULL`.
+#[must_use]
+pub fn sql_date_literal(value: &str) -> String {
+    if value.is_empty() {
+        return "NULL".to_string();
+    }
+    format!("{{d {}}}", sql_string_literal(value))
+}
+
+/// Convert a date-time-like value to a `LabKey` SQL timestamp literal.
+///
+/// Empty strings return `NULL`.
+#[must_use]
+pub fn sql_date_time_literal(value: &str) -> String {
+    if value.is_empty() {
+        return "NULL".to_string();
+    }
+    format!("{{ts {}}}", sql_string_literal(value))
+}
+
 /// JSON body for the `executeSql.api` endpoint. Using a struct with
 /// `skip_serializing_if` replaces the imperative `if let Some` pattern.
 #[derive(Serialize)]
@@ -1093,6 +1194,16 @@ struct ExecuteSqlBody {
     save_in_session: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     include_style: Option<bool>,
+}
+
+/// Request body for the `browseData.api` endpoint.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GetDataViewsBody {
+    include_data: bool,
+    include_metadata: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data_types: Option<Vec<DataViewType>>,
 }
 
 /// Shared request body for query mutation endpoints.
@@ -1799,6 +1910,167 @@ impl LabkeyClient {
         };
 
         self.post(url, &body).await
+    }
+
+    /// List report/query/dataset data views and return the inner `data` payload.
+    ///
+    /// Sends a POST request to `reports-browseData.api` with `LabKey`'s required
+    /// defaults `includeData: true` and `includeMetadata: false`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the HTTP request fails, the server returns
+    /// an error response, the response body cannot be deserialized, or the
+    /// expected `data` envelope field is missing.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::query::{DataViewType, GetDataViewsOptions};
+    ///
+    /// let data = client
+    ///     .get_data_views(
+    ///         GetDataViewsOptions::builder()
+    ///             .data_types(vec![DataViewType::Queries, DataViewType::Reports])
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("Top-level keys: {}", data.as_object().map_or(0, |v| v.len()));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_data_views(
+        &self,
+        options: GetDataViewsOptions,
+    ) -> Result<serde_json::Value, LabkeyError> {
+        let url = self.build_url(
+            "reports",
+            "browseData.api",
+            options.container_path.as_deref(),
+        );
+        let body = GetDataViewsBody {
+            include_data: true,
+            include_metadata: false,
+            data_types: options.data_types,
+        };
+        let response: serde_json::Value = self.post(url, &body).await?;
+
+        let data =
+            response
+                .get("data")
+                .cloned()
+                .ok_or_else(|| LabkeyError::UnexpectedResponse {
+                    status: StatusCode::OK,
+                    text: format!("missing `data` field in browseData response: {response}"),
+                })?;
+
+        if data.is_null() || !(data.is_object() || data.is_array()) {
+            return Err(LabkeyError::UnexpectedResponse {
+                status: StatusCode::OK,
+                text: format!("invalid `data` field in browseData response: {response}"),
+            });
+        }
+
+        Ok(data)
+    }
+
+    /// Validate a query payload against server-side parsing and execution rules.
+    ///
+    /// Sends a GET request to `query-validateQuery.api` by default. When
+    /// `validate_query_metadata` is true, the method targets
+    /// `query-validateQueryMetadata.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the HTTP request fails, the server returns
+    /// an error response, or the response body cannot be deserialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::query::ValidateQueryOptions;
+    ///
+    /// let result = client
+    ///     .validate_query(
+    ///         ValidateQueryOptions::builder()
+    ///             .schema_name("lists".to_string())
+    ///             .query_name("People".to_string())
+    ///             .validate_query_metadata(true)
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("Valid: {}", result.valid);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn validate_query(
+        &self,
+        options: ValidateQueryOptions,
+    ) -> Result<ValidateQueryResponse, LabkeyError> {
+        let action = if options.validate_query_metadata.unwrap_or(false) {
+            "validateQueryMetadata.api"
+        } else {
+            "validateQuery.api"
+        };
+
+        let url = self.build_url("query", action, options.container_path.as_deref());
+        let params: Vec<(String, String)> = [
+            opt("schemaName", options.schema_name),
+            opt("queryName", options.query_name),
+            opt("sql", options.sql),
+            opt("viewName", options.view_name),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        self.get(url, &params).await
+    }
+
+    /// Return the current date/time from the `LabKey` server.
+    ///
+    /// Sends a GET request to `query-getServerDate.api` with no query
+    /// parameters and no container path segment.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the HTTP request fails, the server returns
+    /// an error response, or the response body cannot be deserialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// let server_date = client.get_server_date().await?;
+    /// println!("Server date: {}", server_date.date);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_server_date(&self) -> Result<GetServerDateResponse, LabkeyError> {
+        let url = self.build_url("query", "getServerDate.api", Some(""));
+        self.get(url, &[]).await
     }
 
     /// Insert rows into a query table.
@@ -2667,6 +2939,36 @@ mod tests {
     }
 
     #[test]
+    fn query_misc_endpoint_urls_match_expected_actions() {
+        let client = test_client("https://labkey.example.com/labkey", "/MyProject/MyFolder");
+
+        assert_eq!(
+            client
+                .build_url("reports", "browseData.api", Some("/Alt/Container"))
+                .as_str(),
+            "https://labkey.example.com/labkey/Alt/Container/reports-browseData.api"
+        );
+        assert_eq!(
+            client
+                .build_url("query", "validateQuery.api", Some("/Alt/Container"))
+                .as_str(),
+            "https://labkey.example.com/labkey/Alt/Container/query-validateQuery.api"
+        );
+        assert_eq!(
+            client
+                .build_url("query", "validateQueryMetadata.api", Some("/Alt/Container"))
+                .as_str(),
+            "https://labkey.example.com/labkey/Alt/Container/query-validateQueryMetadata.api"
+        );
+        assert_eq!(
+            client
+                .build_url("query", "getServerDate.api", Some(""))
+                .as_str(),
+            "https://labkey.example.com/labkey/query-getServerDate.api"
+        );
+    }
+
+    #[test]
     fn save_rows_command_serializes_command_wire_value() {
         let command = SaveRowsCommand::builder()
             .command(CommandType::Update)
@@ -2726,6 +3028,136 @@ mod tests {
     #[test]
     fn command_type_variant_count_regression() {
         assert_eq!(command_type_variant_count(CommandType::Delete), 3);
+    }
+
+    #[test]
+    fn data_view_type_serializes_exact_wire_values() {
+        assert_eq!(
+            serde_json::to_string(&DataViewType::Datasets).expect("should serialize"),
+            "\"datasets\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DataViewType::Queries).expect("should serialize"),
+            "\"queries\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DataViewType::Reports).expect("should serialize"),
+            "\"reports\""
+        );
+    }
+
+    #[test]
+    fn data_view_type_deserializes_exact_wire_values() {
+        let datasets: DataViewType =
+            serde_json::from_str("\"datasets\"").expect("should deserialize");
+        let queries: DataViewType =
+            serde_json::from_str("\"queries\"").expect("should deserialize");
+        let reports: DataViewType =
+            serde_json::from_str("\"reports\"").expect("should deserialize");
+
+        assert_eq!(datasets, DataViewType::Datasets);
+        assert_eq!(queries, DataViewType::Queries);
+        assert_eq!(reports, DataViewType::Reports);
+    }
+
+    #[test]
+    fn data_view_type_rejects_unknown_wire_value() {
+        let err = serde_json::from_str::<DataViewType>("\"charts\"")
+            .expect_err("unknown data view type should fail to deserialize");
+        assert!(err.is_data());
+    }
+
+    fn data_view_type_variant_count(value: DataViewType) -> usize {
+        match value {
+            DataViewType::Datasets | DataViewType::Queries | DataViewType::Reports => 3,
+        }
+    }
+
+    #[test]
+    fn data_view_type_variant_count_regression() {
+        assert_eq!(data_view_type_variant_count(DataViewType::Datasets), 3);
+    }
+
+    #[test]
+    fn get_data_views_body_serializes_required_flags_and_optional_data_types() {
+        let body = GetDataViewsBody {
+            include_data: true,
+            include_metadata: false,
+            data_types: Some(vec![DataViewType::Queries, DataViewType::Reports]),
+        };
+
+        let value = serde_json::to_value(body).expect("should serialize");
+        let obj = value.as_object().expect("body should be object");
+
+        assert_eq!(obj.get("includeData"), Some(&serde_json::json!(true)));
+        assert_eq!(obj.get("includeMetadata"), Some(&serde_json::json!(false)));
+        assert_eq!(
+            obj.get("dataTypes"),
+            Some(&serde_json::json!(["queries", "reports"]))
+        );
+    }
+
+    #[test]
+    fn get_data_views_body_omits_data_types_when_absent() {
+        let body = GetDataViewsBody {
+            include_data: true,
+            include_metadata: false,
+            data_types: None,
+        };
+
+        let value = serde_json::to_value(body).expect("should serialize");
+        let obj = value.as_object().expect("body should be object");
+
+        assert_eq!(obj.get("includeData"), Some(&serde_json::json!(true)));
+        assert_eq!(obj.get("includeMetadata"), Some(&serde_json::json!(false)));
+        assert!(!obj.contains_key("dataTypes"));
+    }
+
+    #[test]
+    fn validate_query_response_deserializes_with_extra_fields() {
+        let json = serde_json::json!({
+            "valid": true,
+            "queryName": "People",
+            "schemaName": "lists"
+        });
+
+        let response: ValidateQueryResponse =
+            serde_json::from_value(json).expect("should deserialize");
+        assert!(response.valid);
+        assert_eq!(
+            response.extra.get("queryName"),
+            Some(&serde_json::json!("People"))
+        );
+    }
+
+    #[test]
+    fn get_server_date_response_deserializes() {
+        let json = serde_json::json!({"date": "2026-03-04T17:34:00.000Z"});
+        let response: GetServerDateResponse =
+            serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(response.date, "2026-03-04T17:34:00.000Z");
+    }
+
+    #[test]
+    fn sql_literal_helpers_escape_single_quotes_and_format_wrappers() {
+        assert_eq!(sql_string_literal("O'Brien"), "'O''Brien'");
+        assert_eq!(sql_date_literal("2026-03-04"), "{d '2026-03-04'}");
+        assert_eq!(
+            sql_date_time_literal("2026-03-04 17:35:30"),
+            "{ts '2026-03-04 17:35:30'}"
+        );
+    }
+
+    #[test]
+    fn sql_literal_helpers_return_null_for_empty_input() {
+        assert_eq!(sql_string_literal(""), "NULL");
+        assert_eq!(sql_date_literal(""), "NULL");
+        assert_eq!(sql_date_time_literal(""), "NULL");
+    }
+
+    #[test]
+    fn url_column_prefix_regression() {
+        assert_eq!(URL_COLUMN_PREFIX, "_labkeyurl_");
     }
 
     #[test]

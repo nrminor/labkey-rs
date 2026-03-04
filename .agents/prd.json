@@ -174,8 +174,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented US-009 query utility coverage in src/query.rs by adding URL_COLUMN_PREFIX and SQL literal helpers sql_string_literal, sql_date_literal, and sql_date_time_literal with quote escaping behavior and regression tests. Added typed query utility API surface with non-exhaustive DataViewType, GetDataViewsOptions, ValidateQueryOptions, ValidateQueryResponse, and GetServerDateResponse. Implemented LabkeyClient::get_data_views using reports-browseData.api with strict includeData=true/includeMetadata=false request contract and explicit envelope extraction of response.data, returning LabkeyError::UnexpectedResponse when data is missing or malformed. Implemented LabkeyClient::validate_query with action switching between query-validateQuery.api and query-validateQueryMetadata.api based on validate_query_metadata. Implemented LabkeyClient::get_server_date targeting query-getServerDate.api with no container path segment and no query params. Expanded unit and integration tests for endpoint URL/action routing, request body/param contracts, DataViewType serde round-trips plus unknown-value rejection and variant-count regression, envelope extraction success/error paths, SQL literal escaping/formatting behavior, URL_COLUMN_PREFIX regression, and get_server_date path semantics. Solicited feedback from nick-isms/testing-guru/semver-nag, incorporated follow-up improvements, and verified all quality gates with just check before and after feedback changes."
     },
     {
       "id": "US-010",

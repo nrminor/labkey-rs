@@ -8,15 +8,16 @@ use labkey_rs::client::__internal_test_support;
 use labkey_rs::common::AuditBehavior;
 use labkey_rs::filter::Filter;
 use labkey_rs::query::{
-    CommandType, DeleteQueryViewOptions, DeleteRowsOptions, ExecuteSqlOptions, GetQueriesOptions,
-    GetQueryDetailsOptions, GetQueryViewsOptions, GetSchemasOptions, InsertRowsOptions,
-    MoveRowsOptions, SaveQueryViewsOptions, SaveRowsCommand, SaveRowsOptions,
-    SaveSessionViewOptions, SelectDistinctOptions, SelectRowsOptions, TruncateTableOptions,
-    UpdateRowsOptions,
+    CommandType, DataViewType, DeleteQueryViewOptions, DeleteRowsOptions, ExecuteSqlOptions,
+    GetDataViewsOptions, GetQueriesOptions, GetQueryDetailsOptions, GetQueryViewsOptions,
+    GetSchemasOptions, InsertRowsOptions, MoveRowsOptions, SaveQueryViewsOptions, SaveRowsCommand,
+    SaveRowsOptions, SaveSessionViewOptions, SelectDistinctOptions, SelectRowsOptions,
+    TruncateTableOptions, UpdateRowsOptions, ValidateQueryOptions,
 };
 use url::Url;
 use wiremock::matchers::{
     basic_auth, body_json, body_string_contains, header, header_exists, method, path, query_param,
+    query_param_is_missing,
 };
 
 #[tokio::test]
@@ -641,6 +642,212 @@ async fn delete_query_view_complete_semantics_follow_revert() {
         .await
         .expect("delete query view complete should succeed");
     assert_eq!(response_complete["deleted"], serde_json::json!(true));
+}
+
+#[tokio::test]
+async fn get_data_views_posts_browse_data_body_and_extracts_data_envelope() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/reports-browseData.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "includeData": true,
+            "includeMetadata": false,
+            "dataTypes": ["queries", "reports"]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": {
+                "queries": [{"name": "People"}],
+                "reports": []
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client
+        .get_data_views(
+            GetDataViewsOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .data_types(vec![DataViewType::Queries, DataViewType::Reports])
+                .build(),
+        )
+        .await
+        .expect("get data views should succeed");
+
+    assert_eq!(result["queries"][0]["name"], serde_json::json!("People"));
+}
+
+#[tokio::test]
+async fn get_data_views_missing_data_envelope_maps_to_unexpected_response() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/reports-browseData.api"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "queries": []
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client
+        .get_data_views(GetDataViewsOptions::builder().build())
+        .await;
+
+    match result {
+        Err(LabkeyError::UnexpectedResponse { status, text }) => {
+            assert_eq!(status, reqwest::StatusCode::OK);
+            assert!(text.contains("missing `data` field"));
+        }
+        other => panic!("expected LabkeyError::UnexpectedResponse, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn get_data_views_invalid_data_envelope_maps_to_unexpected_response() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/reports-browseData.api"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": null
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client
+        .get_data_views(GetDataViewsOptions::builder().build())
+        .await;
+
+    match result {
+        Err(LabkeyError::UnexpectedResponse { status, text }) => {
+            assert_eq!(status, reqwest::StatusCode::OK);
+            assert!(text.contains("invalid `data` field"));
+        }
+        other => panic!("expected LabkeyError::UnexpectedResponse, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn validate_query_switches_action_when_metadata_validation_requested() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/query-validateQuery.api"))
+        .and(query_param("schemaName", "lists"))
+        .and(query_param("queryName", "People"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "valid": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/query-validateQueryMetadata.api"))
+        .and(query_param("schemaName", "lists"))
+        .and(query_param("queryName", "People"))
+        .and(query_param("viewName", "All"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "valid": false
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+
+    let base_validation = client
+        .validate_query(
+            ValidateQueryOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .build(),
+        )
+        .await
+        .expect("base validate query should succeed");
+    assert!(base_validation.valid);
+
+    let metadata_validation = client
+        .validate_query(
+            ValidateQueryOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .view_name("All".to_string())
+                .validate_query_metadata(true)
+                .build(),
+        )
+        .await
+        .expect("metadata validate query should succeed");
+    assert!(!metadata_validation.valid);
+}
+
+#[tokio::test]
+async fn validate_query_forwards_sql_param() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/query-validateQuery.api"))
+        .and(query_param(
+            "sql",
+            "SELECT * FROM lists.People WHERE Name = 'A&B'",
+        ))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "valid": true
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client
+        .validate_query(
+            ValidateQueryOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .sql("SELECT * FROM lists.People WHERE Name = 'A&B'".to_string())
+                .build(),
+        )
+        .await
+        .expect("validate query should succeed");
+
+    assert!(result.valid);
+}
+
+#[tokio::test]
+async fn get_server_date_uses_no_container_path_and_no_params() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/query-getServerDate.api"))
+        .and(query_param_is_missing("schemaName"))
+        .and(query_param_is_missing("queryName"))
+        .and(query_param_is_missing("sql"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "date": "2026-03-04T18:00:00.000Z"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client
+        .get_server_date()
+        .await
+        .expect("get server date should succeed");
+
+    assert_eq!(result.date, "2026-03-04T18:00:00.000Z");
 }
 
 #[tokio::test]
