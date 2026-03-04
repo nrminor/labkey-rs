@@ -1,0 +1,678 @@
+{
+  "project": "labkey-rs",
+  "branchName": "main",
+  "description": "Unofficial Rust client for the LabKey Server REST API, ported from the official JS/Java clients. Typed async access to query, security, domain, experiment, assay, pipeline, report, and other modules.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Semver guardrails and common audit type",
+      "description": "As a library maintainer, I want to apply one-time non-exhaustive and shared-type changes now so that future API growth does not cause additional breaking changes.",
+      "acceptanceCriteria": [
+        "`src/client.rs` marks `ClientConfig` with `#[non_exhaustive]` and existing in-crate construction paths still compile.",
+        "`src/filter.rs` marks both `FilterType` and `ContainerFilter` with `#[non_exhaustive]`.",
+        "`src/error.rs` adds `LabkeyError::InvalidInput(String)` for client-side validation failures.",
+        "`src/common.rs` is created with `AuditBehavior` only, using `#[non_exhaustive]` and derives `Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize`.",
+        "`src/lib.rs` exposes `pub mod common;` and does not re-export `AuditBehavior` at crate root.",
+        "`AuditBehavior` has serde round-trip tests for `NONE`, `SUMMARY`, and `DETAILED`, plus a `variant_count` regression test.",
+        "A test verifies `ClientConfig` construction still works inside this crate after the non-exhaustive change.",
+        "New/changed public items introduced in this story have rustdoc comments.",
+        "New source files added to `.gitignore` allow list.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Client request options and multipart plumbing",
+      "description": "As an SDK developer, I want configurable internal request options so that later endpoints can support timeout, redirect behavior, accepted statuses, and multipart POSTs consistently.",
+      "acceptanceCriteria": [
+        "`src/client.rs` defines `pub(crate) RequestOptions` with fields `timeout: Option<Duration>`, `no_follow_redirects: bool`, and `accepted_statuses: Vec<reqwest::StatusCode>`, deriving `Debug, Default`.",
+        "`LabkeyClient` gains `get_with_options`, `post_with_options`, and `post_multipart` internal methods that apply timeout and optional no-redirect behavior via a one-off `reqwest::Client` with `redirect::Policy::none()`.",
+        "Response handling in new option-aware methods accepts either standard success statuses or explicitly listed `accepted_statuses`, with existing error mapping behavior preserved.",
+        "Existing `get` and `post` delegate to the new option-aware methods using `RequestOptions::default()` without changing external API signatures.",
+        "`Cargo.toml` enables reqwest `multipart` feature if it is not already enabled.",
+        "Unit tests verify `RequestOptions::default()` values and confirm refactored `get`/`post` behavior remains compatible with existing URL/header expectations.",
+        "No `.unwrap()` or `.expect()` is introduced in library code.",
+        "Internal/private additions are documented where needed for maintainability; no new public undocumented API is introduced.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Integration test harness with mock server",
+      "description": "As a maintainer, I want reusable HTTP integration test infrastructure so that client behavior can be validated end-to-end for status handling, multipart, and request wiring.",
+      "acceptanceCriteria": [
+        "`tests/common/mod.rs` is added with `test_client(mock_server_url: &str) -> LabkeyClient`, `fixture<T: DeserializeOwned>(name: &str) -> T`, and re-exports for shared integration test use.",
+        "`Cargo.toml` adds either `wiremock` or `mockito` under `[dev-dependencies]` and integration tests compile against it.",
+        "`tests/client_integration.rs` includes tests for GET URL/query/auth/header behavior and POST URL/body/auth behavior.",
+        "`tests/client_integration.rs` includes tests proving non-2xx JSON API errors map to `LabkeyError::Api` and non-JSON failures map to `LabkeyError::UnexpectedResponse`.",
+        "`tests/client_integration.rs` includes tests exercising `RequestOptions` timeout plumbing path and multipart request content/form-part behavior.",
+        "`tests/fixtures/` directory is created for reusable JSON payloads (empty is acceptable in this commit).",
+        "`.gitignore` is updated to allow all new tracked test files/paths for this story.",
+        "Integration tests follow project conventions (files under `tests/`, no unrelated refactors).",
+        "New source files added to `.gitignore` allow list.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Query mutation endpoints core set",
+      "description": "As an API consumer, I want insert/update/delete/truncate query mutation endpoints so that I can perform row-level and table-level write operations through typed Rust methods.",
+      "acceptanceCriteria": [
+        "`src/query.rs` adds `ModifyRowsResults` as `#[non_exhaustive]` with derives `Debug, Clone, Deserialize` and camelCase serde mapping.",
+        "`src/query.rs` adds internal `MutateRowsBody` with `#[derive(Serialize)]` and `#[serde(skip_serializing_if = \"Option::is_none\")]` on optional fields; `serde_json::json!` is not used.",
+        "`InsertRowsOptions`, `UpdateRowsOptions`, `DeleteRowsOptions`, and `TruncateTableOptions` are implemented with bon builders, derive `Debug, Clone`, and are `#[non_exhaustive]` without `Serialize`/`Deserialize` derives.",
+        "`LabkeyClient` implements `insert_rows`, `update_rows`, `delete_rows`, and `truncate_table` using shared body-shaping logic and endpoint actions `query-insertRows.api`, `query-updateRows.api`, `query-deleteRows.api`, and `query-truncateTable.api`.",
+        "Each endpoint supports optional `container_path` through its options struct.",
+        "Body contracts match plan exactly: required keys present per endpoint and optional keys omitted when `None`; `auditBehavior` serializes to expected wire values.",
+        "Endpoint rustdocs include `# Errors` and `# Example` sections with `no_run` examples.",
+        "Tests cover, for each endpoint in scope: URL construction, body construction (required/optional omissions), enum wire values, response deserialization (happy/minimal), envelope extraction behavior if applicable, and edge cases (including empty rows and zero `rowsAffected`).",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Query mutation endpoints move and save",
+      "description": "As an API consumer, I want move and save row mutation endpoints so that I can batch mixed commands and move records between containers with typed request/response handling.",
+      "acceptanceCriteria": [
+        "`src/query.rs` adds `MoveRowsOptions`, `MoveRowsResponse`, `SaveRowsOptions`, `SaveRowsCommand`, `SaveRowsResponse`, and `CommandType` in this module only.",
+        "All new option structs use bon builders, are `#[non_exhaustive]`, derive `Debug, Clone`, and do not derive serde traits.",
+        "`CommandType` is a C-like enum with derives `Debug, Clone, Copy, PartialEq, Eq`, is `#[non_exhaustive]`, has explicit serde wire mapping, and remains in `query.rs`.",
+        "`LabkeyClient` implements `move_rows` and `save_rows` as JSON POST endpoints with correct query controller actions.",
+        "Response types are `#[non_exhaustive]`, derive `Debug, Clone, Deserialize`, and use camelCase serde conventions.",
+        "Endpoint rustdocs include `# Errors` and `# Example` sections with `no_run` examples.",
+        "Tests cover URL construction for both endpoints, `SaveRowsCommand` serialization including command wire format, `CommandType` serde round-trip for every variant plus `variant_count`, response deserialization for move/save payloads, and edge case of empty `commands`.",
+        "No `.unwrap()` or `.expect()` is introduced in library code.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Query read endpoints select distinct and details",
+      "description": "As an API consumer, I want typed select-distinct and query-details endpoints so that I can discover schema metadata and constrained result sets reliably.",
+      "acceptanceCriteria": [
+        "`src/query.rs` adds `SelectDistinctOptions`, `SelectDistinctResponse`, `GetQueryDetailsOptions`, and `QueryDetailsResponse` plus all specified supporting types (`QueryDetailsColumn`, `QueryLookup`, `QueryView`, `QueryViewColumn`, `QueryViewFilter`, `QueryViewSort`, `QueryImportTemplate`, `QueryIndex`).",
+        "All option structs use bon builders, are `#[non_exhaustive]`, derive `Debug, Clone`, and do not derive serde traits.",
+        "All response/server vocabulary structs are `#[non_exhaustive]`, derive `Debug, Clone, Deserialize`, and use camelCase serde mapping where applicable.",
+        "`QueryDetailsColumn` includes `#[serde(flatten)] pub extra: HashMap<String, serde_json::Value>`.",
+        "`LabkeyClient` implements `select_distinct_rows` and `get_query_details` with correct controller/action and GET param construction via existing declarative option-param patterns.",
+        "`select_distinct_rows` maps `max_rows: -1` to query parameter `showRows=all`.",
+        "Endpoint rustdocs include `# Errors` and `# Example` sections with `no_run` examples.",
+        "Tests cover URL/params for both endpoints, `SelectDistinctResponse` deserialization, full fixture deserialization for `QueryDetailsResponse`, optional-field present/absent behavior for `QueryDetailsColumn`, and relevant edge cases.",
+        "`tests/fixtures/query_details.json` is added as a realistic fixture and any newly tracked fixture/source paths are allowed in `.gitignore`.",
+        "New source files added to `.gitignore` allow list.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Query schema and query listing endpoints",
+      "description": "As an API consumer, I want schema and query listing methods so that I can enumerate available query surfaces before issuing read/write operations.",
+      "acceptanceCriteria": [
+        "`src/query.rs` adds `GetQueriesOptions`, `GetQueriesResponse`, `QueryInfo`, and `GetSchemasOptions` with required derive and non-exhaustive conventions.",
+        "Option structs use bon builders, are `#[non_exhaustive]`, derive `Debug, Clone`, and do not derive serde traits.",
+        "Response structs are `#[non_exhaustive]`, derive `Debug, Clone, Deserialize`, and use camelCase serde mapping where applicable.",
+        "`LabkeyClient` adds `get_queries` and `get_schemas` methods using actions `query-getQueries.api` and `query-getSchemas.api`.",
+        "`get_queries` parameter names match server contract exactly: `includeColumns`, `includeSystemQueries`, `includeTitle`, `includeUserQueries`, `includeViewDataUrl`, and `queryDetailColumns`.",
+        "`get_schemas` return type is `serde_json::Value` (the server returns a JSON object keyed by schema name).",
+        "Endpoint rustdocs include `# Errors` and `# Example` sections with `no_run` examples.",
+        "Tests cover URL construction for both endpoints, parameter construction for `get_queries` verifying all six named param keys, `get_schemas` deserialization of a representative fixture (JSON object keyed by schema name), and `GetQueriesResponse` deserialization with nested `queries` arrays.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Query view management endpoints",
+      "description": "As an API consumer, I want query-view management methods so that I can fetch, save, session-save, and delete views with correct LabKey wire semantics.",
+      "acceptanceCriteria": [
+        "`src/query.rs` adds `GetQueryViewsOptions`, `SaveQueryViewsOptions`, `SaveSessionViewOptions`, and `DeleteQueryViewOptions` following option-struct conventions (bon builder, `#[non_exhaustive]`, `Debug, Clone`, no serde derives).",
+        "`LabkeyClient` implements `get_query_views`, `save_query_views`, `save_session_view`, and `delete_query_view` with correct controller/action routes.",
+        "`save_session_view` JSON body uses literal keys `query.queryName` and `query.viewName` (flat key names, not nested objects).",
+        "`delete_query_view` sends `complete: !revert` only when `revert` is explicitly provided; omits `complete` when `revert` is `None`.",
+        "`save_query_views` body sends boolean flags only when true, omitting false/None fields per API contract.",
+        "Endpoint rustdocs include `# Errors` and `# Example` sections with `no_run` examples.",
+        "Tests cover URL construction for all four endpoints, special JSON key semantics for `save_session_view`, `complete` logic for `delete_query_view`, and conditional boolean emission for `save_query_views`.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Query miscellaneous endpoints and SQL literal utilities",
+      "description": "As an API consumer, I want remaining core query utilities and helper methods so that I can validate metadata, fetch data views/server date, and safely build SQL literals.",
+      "acceptanceCriteria": [
+        "`src/query.rs` adds `GetDataViewsOptions`, `DataViewType`, `ValidateQueryOptions`, `ValidateQueryResponse`, `GetServerDateResponse`, utility functions `sql_date_literal`, `sql_date_time_literal`, `sql_string_literal`, and constant `URL_COLUMN_PREFIX`.",
+        "`DataViewType` is a C-like enum with derives `Debug, Clone, Copy, PartialEq, Eq`, is `#[non_exhaustive]`, and includes serde wire mapping with full round-trip coverage and `variant_count` test.",
+        "Response types follow server-response conventions (`#[non_exhaustive]`, `Debug, Clone, Deserialize`, camelCase where applicable).",
+        "`LabkeyClient` implements `get_data_views`, `get_server_date`, and `validate_query` with required special behavior: `get_data_views` sends `includeData: true` and `includeMetadata: false` and extracts `response.data`; `validate_query` switches to `query-validateQueryMetadata.api` when requested; `get_server_date` uses no params and no container path.",
+        "Envelope extraction failures return `LabkeyError::UnexpectedResponse`.",
+        "SQL literal utilities double single quotes (`'` to `''`) and tests assert escaping and formatting.",
+        "Endpoint rustdocs include `# Errors` and `# Example` sections with `no_run` examples.",
+        "Tests cover URL/action switching, body contracts, envelope extraction happy/error cases, SQL literal behavior, enum wire values, `variant_count`, and `URL_COLUMN_PREFIX` regression.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Query import_data multipart endpoint",
+      "description": "As an API consumer, I want typed multipart import-data support so that I can upload data from text, files, paths, or module resources through one validated API.",
+      "acceptanceCriteria": [
+        "`src/query.rs` adds `ImportDataOptions`, `ImportDataSource`, `InsertOption`, and `ImportDataResponse` with required non-exhaustive and derive conventions.",
+        "`ImportDataSource` enforces exactly one source at the type level across `Text`, `File`, `Path`, and `ModuleResource` variants.",
+        "`InsertOption` and other wire enums use explicit serde mapping; C-like enums include `variant_count` tests.",
+        "`LabkeyClient::import_data` uses `post_multipart` and sends required parts `schemaName` and `queryName` plus source-specific multipart parts exactly as specified (`moduleResource` + `module` for module-resource mode).",
+        "Optional multipart fields (`format`, `insertOption`, `useAsync`, `saveToPipeline`, `importIdentity`, `importLookupByAlternateKey`) are included only when provided.",
+        "`ImportDataResponse` deserializes correctly with and without `job_id`.",
+        "Endpoint rustdocs include `# Errors` and `# Example` sections with `no_run` examples.",
+        "Tests verify multipart field construction for every `ImportDataSource` variant, enum wire round-trips, response deserialization (including minimal path), and edge cases.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Query get_data endpoint",
+      "description": "As an API consumer, I want typed getRawData support so that I can issue query/sql source payloads with transforms and receive JSON-rendered rows reliably.",
+      "acceptanceCriteria": [
+        "`src/query.rs` adds `GetDataOptions`, `GetDataSource`, `GetDataSourceType`, `GetDataSort`, `GetDataTransform`, `GetDataFilter`, `GetDataAggregate`, and `GetDataPivot` using required option/response conventions.",
+        "All new option/config structs are `#[non_exhaustive]`, derive `Debug, Clone`, use bon builders where appropriate, and do not derive serde unless they are internal JSON body structs.",
+        "`LabkeyClient::get_data` sends POST to `query-getData` (no `.api` suffix) and returns `SelectRowsResponse`.",
+        "Request JSON body matches required structure for `source`, `renderer`, `transforms`, and `pivot`; `renderer.type` is always internally set to `\"json\"` and not exposed as caller-configurable.",
+        "Source encoding is correct for Query vs Sql modes, and optional fields are omitted when not supplied.",
+        "Endpoint rustdocs include `# Errors` and `# Example` sections with `no_run` examples.",
+        "Tests cover URL suffix correctness, renderer/source JSON construction, omission of absent optionals, response type handling, and edge cases.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Review iteration A: query parity audit gate",
+      "description": "As a maintainer, I want a focused parity audit against upstream query clients so that we can detect and correct high-risk mismatches before expanding scope.",
+      "acceptanceCriteria": [
+        "Audit scope is limited to cross-referencing upstream JS (`src/labkey/query/Utils.ts`, `src/labkey/query/GetData.ts`, `src/labkey/Query.ts`) and Java (`src/org/labkey/remoteapi/query/`) query surfaces against current Rust query implementation.",
+        "A brief endpoint-by-endpoint parity checklist is produced with explicit status per endpoint (match, partial, missing, behavior mismatch) and concrete evidence for each discrepancy. The checklist may be recorded in story notes or a tracked project file — a repo-tracked artifact is not required.",
+        "Only discrepancy reporting and minimal critical fixes are allowed; no new endpoints, broad refactors, or opportunistic feature additions are introduced.",
+        "If more than 5 discrepancies are found, all are documented but code fixes are limited to the most critical subset, with rationale recorded for deferred items.",
+        "Any code changes made during this audit include tests covering the corrected behavior and preserve existing API conventions/documentation requirements.",
+        "If new source files are created for fixes, they are added to `.gitignore` allow list.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Scaffold security module and shared security types",
+      "description": "As a library maintainer, I want the security module scaffolded with shared types and moved common helpers so that later security endpoint commits can build on stable, reusable foundations.",
+      "acceptanceCriteria": [
+        "`src/security/mod.rs` and `src/security/types.rs` are created, `src/lib.rs` exports `pub mod security;`, and `src/security/mod.rs` declares submodules and re-exports shared types needed by downstream endpoint modules.",
+        "`src/security/types.rs` defines `Container`, `ContainerFormats`, `ContainerHierarchy`, `ModuleProperty`, `FolderType`, `FolderTypeWebPart`, `ModuleInfo`, `User`, `Group`, `Role`, `RolePermission`, `SecurableResource`, `Policy`, and `PolicyAssignment`, each marked `#[non_exhaustive]` and using Rust/serde derives consistent with construction rules (`Debug, Clone, Deserialize` for response models; `#[serde(rename_all = \"camelCase\")]` where applicable; no unnecessary `Serialize`).",
+        "Any C-like enums introduced in this commit derive `Debug, Clone, Copy, PartialEq, Eq`, are `#[non_exhaustive]`, and include a `variant_count` unit test.",
+        "`opt()` and `container_filter_to_string` are moved from `src/query.rs` to `src/common.rs` as `pub(crate)` with identical signatures and semantics, and `src/query.rs` imports them from `common` with no behavior change.",
+        "No security endpoint methods are added in this commit; scope is limited to scaffolding, shared types, and helper relocation.",
+        "Inline unit tests in security types cover deserialization of `Container` (`type_` mapped from JSON `type`), recursive `ContainerHierarchy.children`, `ContainerFormats`, and minimal fixtures for `User`, `Group`, `Role`, `Policy`, and `SecurableResource`.",
+        "All existing query module tests continue to pass unchanged, confirming the helper move is behavior-preserving.",
+        "Every new public type has a Rust doc comment; no library code introduces `.unwrap()`/`.expect()` without explicit justification.",
+        "New source files added to `.gitignore` allow list.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Implement security container endpoints batch 1",
+      "description": "As a Rust client user, I want core container mutation and listing endpoints so that I can create, rename, delete, and retrieve containers through typed APIs.",
+      "acceptanceCriteria": [
+        "`src/security/container.rs` is created and wired through `src/security/mod.rs`, implementing `create_container`, `delete_container`, `rename_container`, and `get_containers` on `LabkeyClient`.",
+        "Each endpoint has an options struct using bon builder style, marked `#[non_exhaustive]`, deriving `Debug, Clone`, and not deriving `Serialize`/`Deserialize`.",
+        "Every endpoint options struct includes optional `container_path`; request construction uses shared helpers (`opt()` and `Option::map`/`flatten` patterns for GET params).",
+        "`rename_container` validates input and returns `LabkeyError::InvalidInput` with a descriptive message when both `name` and `title` are `None`.",
+        "`get_containers` always returns `Vec<ContainerHierarchy>` and handles both server response shapes: single container object (wrapped into one-element vec) and envelope `{ containers: [...] }` (inner array extracted).",
+        "JSON request bodies use typed `#[derive(Serialize)]` structs with `#[serde(skip_serializing_if = \"Option::is_none\")]` for optional fields; no `serde_json::json!` is used.",
+        "Endpoint unit tests verify URL construction for `core-createContainer.api`, `core-deleteContainer.api`, `admin-renameContainer.api`, and `project-getContainers.api`.",
+        "Endpoint unit tests verify parameter/body construction, including `multipleContainers=true` when multiple container IDs are passed to `get_containers`, and body fields for `create_container` and `rename_container`.",
+        "Endpoint unit tests verify `get_containers` deserialization/extraction for both single and multi-container response shapes and include edge-case coverage for missing/invalid envelope fields where applicable.",
+        "Public endpoint docs include `# Errors` and `# Example` sections with `no_run` examples.",
+        "New source files added to `.gitignore` allow list.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Implement security container endpoints batch 2",
+      "description": "As a Rust client user, I want additional container and module discovery endpoints so that I can inspect readable containers, folder types, modules, and move containers.",
+      "acceptanceCriteria": [
+        "`src/security/container.rs` is extended with `get_readable_containers`, `get_folder_types`, `get_modules`, and `move_container` endpoint methods and corresponding options/response types.",
+        "All newly added option structs follow the required pattern: bon builder style, `#[non_exhaustive]`, derive `Debug, Clone`, no serde derives, and include optional `container_path`.",
+        "All newly added response structs follow the required pattern: `#[non_exhaustive]`, derive `Debug, Clone, Deserialize`, and apply `#[serde(rename_all = \"camelCase\")]` where field naming requires it.",
+        "`get_readable_containers` uses private envelope extraction and returns the inner `containers` as `Vec<String>`, returning `LabkeyError::UnexpectedResponse` when expected fields are absent.",
+        "`move_container` request body is a typed serializable struct (no `json!`) and serializes `addAlias`, `container`, and `parent` with camelCase wire names and omission of `None` optionals.",
+        "Unit tests verify URL construction for `project-getReadableContainers.api`, `core-getFolderTypes.api`, `admin-getModules.api`, and `core-moveContainer.api`.",
+        "Unit tests verify response deserialization for `FolderType` and `GetModulesResponse` with nested `ModuleInfo` arrays, including minimal-path fixtures.",
+        "Unit tests verify `get_readable_containers` envelope extraction behavior and edge cases for malformed/missing envelope content.",
+        "Public endpoint docs include `# Errors` and `# Example` sections with `no_run` examples.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Implement security user and group endpoints",
+      "description": "As a Rust client user, I want typed user and group management endpoints so that I can manage principals and memberships programmatically.",
+      "acceptanceCriteria": [
+        "`src/security/user.rs` and `src/security/group.rs` are created, wired in `src/security/mod.rs`, and implement: `create_new_user`, `get_users`, `get_users_with_permissions`, `ensure_login`, `create_group`, `delete_group`, `rename_group`, `add_group_members`, `remove_group_members`, and `get_groups_for_current_user`.",
+        "All new option structs follow required construction rules (bon builders, `#[non_exhaustive]`, derive `Debug, Clone`, no serde derive) and include optional `container_path` for endpoint-level container override.",
+        "All new response models follow required response rules (`#[non_exhaustive]`, derive `Debug, Clone, Deserialize`, camelCase serde mapping where needed).",
+        "JSON request bodies are typed serializable structs with `skip_serializing_if` on optional fields and no `serde_json::json!` usage.",
+        "Unit tests verify URL construction for every endpoint in this story and verify request body field names, including `create_group` using `name` (not `groupName`) and `add_group_members` using `groupId` and `principalIds`.",
+        "Unit tests include `CreateNewUserResponse` deserialization with nested `users`/`CreatedUser` and `GetUsersResponse` deserialization for both happy-path and minimal fixtures.",
+        "Any newly introduced server-vocabulary C-like enums include serde wire-value round-trip tests per variant and `variant_count` tests.",
+        "Public endpoint docs include `# Errors` and `# Example` sections with `no_run` examples, and no `.unwrap()`/`.expect()` is added in library code without justification.",
+        "New source files added to `.gitignore` allow list.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Implement security permission and policy endpoints",
+      "description": "As a Rust client user, I want permission and policy APIs so that I can inspect role assignments and manage resource policies from code.",
+      "acceptanceCriteria": [
+        "`src/security/permission.rs` and `src/security/policy.rs` are created, wired in `src/security/mod.rs`, and implement: `get_group_permissions`, `get_user_permissions`, `get_roles`, `get_securable_resources`, `get_policy`, `save_policy`, and `delete_policy`.",
+        "All option structs follow required construction rules (bon builders, `#[non_exhaustive]`, derive `Debug, Clone`, no serde derive) and include optional `container_path`.",
+        "All response types follow required response rules (`#[non_exhaustive]`, derive `Debug, Clone, Deserialize`, `camelCase` serde mapping where applicable).",
+        "`get_policy` is implemented as POST (not GET) and sends a typed JSON body containing `resourceId` with correct wire casing.",
+        "`get_policy` response processing sets `policy.requested_resource_id = config.resource_id` on the returned `GetPolicyResponse`, matching the JS client's behavior of stamping the request's resource ID onto the response policy.",
+        "Envelope extraction uses private envelope structs and returns `LabkeyError::UnexpectedResponse` when expected inner fields are absent.",
+        "Unit tests verify URL construction for all seven endpoints and confirm controller/action routing uses the `security` controller where specified by plan.",
+        "Unit tests cover `GroupPermissionsResponse` deserialization with nested `PermissionsContainer.children` and `SecurableResource` deserialization with recursive `children`, including minimal-path fixtures.",
+        "Any new server-vocabulary C-like enums include serde wire-value round-trip tests per variant and `variant_count` tests.",
+        "Public endpoint docs include `# Errors` and `# Example` sections with `no_run` examples.",
+        "New source files added to `.gitignore` allow list.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Implement security session and impersonation Java-only endpoints",
+      "description": "As a Rust client user, I want Java-only session and impersonation endpoints ported with exact request semantics so that authentication workflows behave like upstream clients.",
+      "acceptanceCriteria": [
+        "`src/security/session.rs` is created, wired in `src/security/mod.rs`, and implements `logout`, `who_am_i`, `delete_user`, `impersonate_user`, and `stop_impersonating` with exact per-endpoint method/controller/suffix behavior from the matrix.",
+        "`logout` is POST to `login-logout` (no `.api`), with no JSON body and no params; unit tests verify method, URL path, and absence of body.",
+        "`who_am_i` is GET to `login-whoami.api` with no params; response type deserializes from fixture and includes minimal-path test.",
+        "`delete_user` is POST to `security-deleteUser` (no `.api`) with typed JSON body `{ id }`; unit tests verify no `.api` suffix and body shape.",
+        "`impersonate_user` is POST to `user-impersonateUser.api` with query parameters (not JSON body); tests assert query-string encoding and empty request body.",
+        "`ImpersonateTarget` enum is implemented with `UserId(i64)` and `Email(String)` behavior and covered by tests for both variants' wire parameter mapping.",
+        "`stop_impersonating` is POST to `login-stopImpersonating.api` using `RequestOptions { no_follow_redirects: true, accepted_statuses: vec![StatusCode::FOUND] }`; integration test with wiremock returns 302 and is treated as success.",
+        "Unit tests verify URL construction for all five endpoints across `login`, `user`, and `security` controllers, including suffix differences (`.api` vs none).",
+        "Public endpoint docs include `# Errors` and `# Example` sections with `no_run` examples.",
+        "New source files added to `.gitignore` allow list.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "Review iteration B: security parity audit gate",
+      "description": "As a maintainer, I want an endpoint-by-endpoint parity audit against upstream clients so that the Rust security module stays aligned without scope creep.",
+      "acceptanceCriteria": [
+        "Review is limited to `src/labkey/Security.ts` and `src/org/labkey/remoteapi/security/` upstream references and current Rust security module implementation.",
+        "Produce a parity checklist that enumerates each audited endpoint and marks status as match, mismatch, or not implemented, including concise discrepancy details.",
+        "No new endpoints, broad refactors, or feature additions are introduced during this story; only minimal fixes for confirmed discrepancies are allowed.",
+        "If more than 5 discrepancies are found, all discrepancies are documented but code changes are limited to the most critical subset (up to 5) with rationale captured in story notes or checklist artifact.",
+        "Any discrepancy fixes include targeted tests that demonstrate corrected behavior and preserve existing endpoint contracts.",
+        "If new source files are created for the audit/fixes, they are added to `.gitignore` allow list.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "Implement domain module types and endpoints",
+      "description": "As a Rust library consumer, I want complete domain models and property controller endpoints so that I can create, read, update, list, validate, and delete LabKey domains with typed APIs.",
+      "acceptanceCriteria": [
+        "Create `src/domain.rs` and export it from the crate so the module compiles and is publicly accessible.",
+        "New source files added to `.gitignore` allow list.",
+        "`DomainDesign` is implemented as `#[non_exhaustive]` with `Debug, Clone, Serialize, Deserialize` because it is used for both request and response payloads.",
+        "`DomainField` is implemented as `#[non_exhaustive]` with both `Serialize` and `Deserialize` (since it is used as input to `save_domain`/`create_domain` and as output from `get_domain_details`), typed core fields, many optional fields, and `#[serde(flatten)] pub extra: HashMap<String, serde_json::Value>` for unknown server fields.",
+        "`DomainIndex`, `DomainKind`, and `PropertyUsage` are implemented as `#[non_exhaustive]`; `DomainKind` is a C-like enum deriving `Debug, Clone, Copy, PartialEq, Eq`.",
+        "All domain endpoints are implemented on `LabkeyClient` using controller `property` with exact actions/methods: `create_domain` POST `property-createDomain.api`, `get_domain` GET `property-getDomain.api` (deprecated), `get_domain_details` GET `property-getDomainDetails.api`, `save_domain` POST `property-saveDomain.api`, `drop_domain` POST `property-deleteDomain.api`, `update_domain` POST `property-updateDomain.api`, `list_domains` GET `property-listDomains.api`, `validate_name_expressions` POST `property-validateNameExpressions.api`, `get_domain_name_previews` GET `property-getDomainNamePreviews.api`, `get_properties` POST `property-getProperties.api`, `get_property_usages` GET `property-propertyUsages.api`.",
+        "`get_domain` is annotated `#[deprecated(note = \"use get_domain_details\")]`.",
+        "Any endpoint options structs follow project pattern: `#[non_exhaustive]`, `Debug, Clone`, bon builder, no `Serialize`/`Deserialize`, and include optional `container_path`.",
+        "`create_domain` supports optional `timeout: Duration` plumbed through `RequestOptions { timeout, ..Default::default() }` to the underlying POST call.",
+        "`GetDomainDetailsResponse` and `ListDomainsResponse` are `#[non_exhaustive]`, derive `Debug, Clone, Deserialize`, and use `#[serde(rename_all = \"camelCase\")]`.",
+        "`get_property_usages` uses private envelope struct extraction from `response.data` and returns `LabkeyError::UnexpectedResponse` when the envelope field is missing.",
+        "JSON request bodies are typed structs using `#[derive(Serialize)]` and `#[serde(skip_serializing_if = \"Option::is_none\")]` where applicable; no `serde_json::json!` is used.",
+        "Public types and methods in `src/domain.rs` have doc comments, and each public endpoint method includes `# Errors` and `# Example` sections with `no_run` examples.",
+        "Inline tests cover: `DomainDesign` serialize/deserialize round-trip; `DomainKind` serde round-trips for `DataClass`, `IntList`, `SampleSet`, `StudyDatasetDate`, `StudyDatasetVisit`, `Unknown`, `VarList`; `DomainKind` `variant_count`; URL construction for all 11 endpoints; `drop_domain` JSON body construction; `get_property_usages` envelope extraction success and missing-field error path.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "Add experiment shared types and lineage endpoints",
+      "description": "As a Rust library consumer, I want typed experiment entities and lineage APIs so that I can resolve experiment references and traverse lineage graphs safely.",
+      "acceptanceCriteria": [
+        "Create `src/experiment.rs` and export it from the crate so the module compiles and is publicly accessible.",
+        "New source files added to `.gitignore` allow list.",
+        "`ExpObject`, `RunGroup`, `Run`, `ExpData`, `Material`, `LineageNode`, `LineageEdge`, `PkFilter`, `DataClassRef`, and `SampleSetRef` are implemented as `#[non_exhaustive]` response/input types with derives matching their usage.",
+        "`ExpType` and `SeqType` are implemented as `#[non_exhaustive]` C-like enums with `Debug, Clone, Copy, PartialEq, Eq` and serde wire mapping.",
+        "Lineage endpoints are implemented with exact routes: `lineage` GET `experiment-lineage.api`, `resolve` GET `experiment-resolve.api`.",
+        "`LineageResponse` and `ResolveResponse` are `#[non_exhaustive]` response types with `Debug, Clone, Deserialize` and camelCase serde naming; `LineageResponse` includes `seed`, `seeds`, and `nodes: HashMap<String, LineageNode>`.",
+        "`resolve` uses private envelope extraction from `response.data` and returns `LabkeyError::UnexpectedResponse` when the envelope field is missing.",
+        "GET parameter construction follows declarative `opt()` helper plus `Option::map`/`flatten` style, including repeated `lsid` query params when `lsids` contains multiple values.",
+        "`lineage` supports single-LSID edge behavior and test coverage for deprecated single `lsid` handling versus plural `lsids` path.",
+        "Public types and methods have doc comments, and each endpoint method includes `# Errors` and `# Example` sections with `no_run` examples.",
+        "Inline tests cover: `LineageNode` deserialization with nested `parents`/`children`; `LineageResponse` deserialization with `nodes: HashMap`; `lineage` query construction with repeated `lsid` and `expType` wire values; single-LSID edge case; `ExpType` and `SeqType` serde round-trips for every variant; `variant_count` tests for both enums; URL construction; `resolve` envelope extraction success and missing-field error path.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "Implement experiment batch and run operations",
+      "description": "As a Rust library consumer, I want typed batch/run experiment operations so that I can load and save assay batches, runs, materials, and entity sequences reliably.",
+      "acceptanceCriteria": [
+        "Add endpoints to `src/experiment.rs` with exact routes/methods: `save_batch` POST `assay-saveAssayBatch.api`, `save_batches` POST `assay-saveAssayBatch.api`, `load_batch` POST `assay-getAssayBatch.api`, `load_batches` POST `assay-getAssayBatches.api`, `load_runs` POST `assay-getAssayRuns.api`, `save_runs` POST `assay-saveAssayRuns.api`, `create_hidden_run_group` POST `experiment-createHiddenRunGroup.api`, `set_entity_sequence` POST `experiment-setEntitySequence.api`, `get_entity_sequence` GET `experiment-getEntitySequence.api`.",
+        "`create_hidden_run_group` uses a dedicated enum/typed input that enforces exactly one of `run_ids` or `selection_key` at compile time.",
+        "`save_materials` is implemented as a convenience wrapper and delegates to `insert_rows` with `schema_name: \"Samples\"`, `query_name: options.name`, and `rows: options.materials`, without issuing a direct HTTP request.",
+        "Envelope extraction is implemented with private envelope structs: `load_batch` from `response.batch`, `load_batches` from `response.batches`, and `load_runs` from `response.runs`, each returning `LabkeyError::UnexpectedResponse` when the expected envelope field is absent.",
+        "JSON request payloads use typed `Serialize` structs with camelCase field names and `skip_serializing_if` where needed; `save_batch` wraps a single batch as `batches: [batch]`.",
+        "Any new options structs follow project pattern: bon builder, `#[non_exhaustive]`, derive `Debug, Clone`, no `Serialize`/`Deserialize`, include optional `container_path`.",
+        "Endpoints that support timeout use `RequestOptions { timeout, ..Default::default() }`.",
+        "Public added types/methods have doc comments, and each endpoint method includes `# Errors` and `# Example` sections with `no_run` examples.",
+        "Inline tests cover: `RunGroup` serialize/deserialize round-trip; `save_batch` body wraps single batch in array; envelope extraction for `load_batch`, `load_batches`, `load_runs` happy path and missing-field error path; `save_materials` delegation to `insert_rows` with `schema_name: \"Samples\"`; `SeqType` serde round-trips; URL construction for all added HTTP endpoints.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "Create assay module JS endpoint set",
+      "description": "As a Rust library consumer, I want typed assay JS endpoint support so that I can retrieve assay definitions and NAB runs with correct request encoding.",
+      "acceptanceCriteria": [
+        "Create `src/assay.rs` and export it from the crate so the module compiles and is publicly accessible.",
+        "New source files added to `.gitignore` allow list.",
+        "Implement JS endpoints with exact routes/methods: `get_assays` POST `assay-assayList.api`, `get_nab_runs` GET `nabassay-getNabRuns.api`, `get_study_nab_graph_url` GET `nabassay-getStudyNabGraphURL.api`, `get_study_nab_runs` GET `nabassay-getStudyNabRuns.api`.",
+        "Implement `AssayDesign` as a `#[non_exhaustive]` response type with `Debug, Clone, Deserialize` and camelCase serde naming.",
+        "Implement `AssayLink` and `FitType` as `#[non_exhaustive]` C-like enums deriving `Debug, Clone, Copy, PartialEq, Eq` with explicit serde wire values.",
+        "`get_assays` sends a typed JSON body that wraps all parameters inside a top-level `parameters` object.",
+        "`get_nab_runs` query construction uses `query.sort`, `query.offset`, `query.maxRows`/`query.showRows` prefixes and integrates filter encoding via existing `encode_filters` behavior.",
+        "Any options structs follow project pattern: bon builder, `#[non_exhaustive]`, derive `Debug, Clone`, no serde derives, include optional `container_path`.",
+        "Public added types/methods have doc comments, and each endpoint method includes `# Errors` and `# Example` sections with `no_run` examples.",
+        "Inline tests cover: `AssayDesign` deserialization; `get_assays` body has `parameters` wrapper; `get_nab_runs` query prefix pattern and filter encoding; serde round-trips for all `FitType` variants plus `variant_count`; serde round-trips for all `AssayLink` variants plus `variant_count`; URL construction for all four endpoints.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-024",
+      "title": "Add assay Java non-multipart protocol and run endpoints",
+      "description": "As a Rust library consumer, I want typed Java-style assay protocol/run endpoints so that I can fetch and save protocol definitions and assay run details.",
+      "acceptanceCriteria": [
+        "Add endpoints in `src/assay.rs` with exact routes/methods and no `.api` suffix: `get_protocol` GET `assay-getProtocol`, `save_protocol` POST `assay-saveProtocol`, `get_assay_run` POST `assay-getAssayRun`.",
+        "Implement `AssayProtocol` as `#[non_exhaustive]` deriving `Debug, Clone, Serialize, Deserialize` with camelCase serde naming and all specified fields present: `protocol_id`, `name`, `description`, `provider_name`, `domains`, `allow_background_upload`, `background_upload`, `allow_editable_results`, `editable_results`, `editable_runs`, `save_script_files`, `allow_qc_states`, `qc_enabled`, `allow_spaces_in_path`, `allow_transformation_script`, `auto_copy_target_container_id`, `available_detection_methods`, `selected_detection_method`, `available_metadata_input_formats`, `selected_metadata_input_format`, `available_plate_templates`, `selected_plate_template`, `allow_plate_metadata`, `plate_metadata`, `protocol_parameters`, `protocol_transform_scripts`.",
+        "Implement `ProtocolIdentifier` enum with `ByProvider(String)` and `ById { id: i64, copy: Option<bool> }` and use it in `get_protocol` to enforce mutually exclusive query construction modes.",
+        "`get_protocol` query serialization emits `providerName` in provider mode and `protocolId` with optional `copy` in ID mode.",
+        "`get_protocol` response is extracted from `response.data` envelope (private envelope struct) and returns `AssayProtocol`; returns `LabkeyError::UnexpectedResponse` when the `data` field is absent.",
+        "`save_protocol` serializes `AssayProtocol` directly as request body without ad hoc JSON construction.",
+        "`save_protocol` response is extracted from `response.data` envelope and returns `AssayProtocol`; returns `LabkeyError::UnexpectedResponse` when the `data` field is absent.",
+        "`get_assay_run` serializes a typed body containing required `lsid` field and returns `serde_json::Value` (the response shape is not well-documented upstream; use `Value` initially).",
+        "Any new options structs follow project pattern: bon builder, `#[non_exhaustive]`, derive `Debug, Clone`, no serde derives, include optional `container_path`.",
+        "Public added types/methods have doc comments, and each endpoint method includes `# Errors` and `# Example` sections with `no_run` examples.",
+        "Inline tests cover: full `AssayProtocol` serialize/deserialize round-trip with all listed fields; `get_protocol` params in both identifier modes; `get_protocol` and `save_protocol` envelope extraction from `response.data` (happy path and missing-field error path); `save_protocol` body equals direct protocol serialization; `get_assay_run` body includes `lsid` and response type is `serde_json::Value`; URL construction for all three endpoints (without `.api` suffix).",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-025",
+      "title": "Implement assay import_run multipart API",
+      "description": "As a Rust library consumer, I want a typed multipart import API with mode-specific encoding so that I can upload assay runs from file bytes, server paths, or inline row data safely.",
+      "acceptanceCriteria": [
+        "Add `ImportRunOptions`, `ImportRunSource`, and `ImportRunResponse` to `src/assay.rs`; `ImportRunResponse` is `#[non_exhaustive]` with `Debug, Clone, Deserialize` and camelCase serde naming.",
+        "`ImportRunSource` enforces exactly one source variant: `File { data: Vec<u8>, filename: String }`, `RunFilePath(String)`, or `DataRows(Vec<serde_json::Value>)`.",
+        "Implement `import_run` on `LabkeyClient` using `post_multipart` to endpoint `assay-importRun.api`.",
+        "Multipart encoding for `use_json: false` sends individual text/binary parts via `reqwest::multipart::Form` and `Part`: text fields with `Part::text`, file source as `Part::bytes(data).file_name(filename).mime_str(\"application/octet-stream\")`, `properties` and `batch_properties` encoded with bracket keys `properties[key]` and `batchProperties[key]`, and `dataRows` as JSON text.",
+        "Multipart encoding for `use_json: true` sends exactly one text part named `json` containing a JSON object with all parameters and source payload metadata/data.",
+        "Any options struct(s) introduced follow project pattern: bon builder, `#[non_exhaustive]`, derive `Debug, Clone`, no serde derives, include optional `container_path`; default `use_json` is `false`.",
+        "Public added types/methods have doc comments, and endpoint method includes `# Errors` and `# Example` sections with `no_run` examples.",
+        "Inline tests cover: multipart construction in `use_json: false` mode including expected part names and bracket notation keys; multipart construction in `use_json: true` mode with single `json` part; `ImportRunResponse` deserialization happy and minimal paths; each `ImportRunSource` variant producing correct part names (`file`, `runFilePath`, `dataRows`); URL construction for `assay-importRun.api`.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 25,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-026",
+      "title": "Review iteration C: experiment and assay parity audit gate",
+      "description": "As a maintainer, I want a focused parity audit against upstream JS and Java clients so that Experiment/Assay behavior stays aligned and regressions are caught early.",
+      "acceptanceCriteria": [
+        "Perform endpoint-by-endpoint parity audit limited to existing Experiment and Assay scope by reading upstream `src/labkey/Experiment.ts` and Java assay remote API sources, with special focus on protocol fields and import-run multipart behavior.",
+        "Verify `AssayProtocol` contains the full expected Java `Protocol` field set from this plan and verify `ImportRunCommand` semantics for bracket notation and JSON mode switching.",
+        "Audit outcome is captured as a discrepancy report (in story notes or optionally a tracked file — a repo-tracked artifact is not required), without adding unrelated endpoints, refactors, or feature work.",
+        "If discrepancies are found, apply only minimal critical fixes in existing Experiment/Assay code paths; if discrepancy count exceeds 5, ensure all discrepancies are enumerated while implementing only the most critical fixes.",
+        "No new endpoints are introduced and no broad structural refactor is performed; changes are strictly discrepancy fixes and validation coverage.",
+        "Where discrepancies touch behavior, add or update tests to make parity expectations executable and prevent regression.",
+        "Public API docs remain complete after fixes (`# Errors` and `# Example` with `no_run` on endpoint methods).",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 26,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-027",
+      "title": "Implement pipeline module endpoints",
+      "description": "As a Rust library user, I want typed Pipeline API methods so that I can manage analysis workflows with correct LabKey endpoint behavior.",
+      "acceptanceCriteria": [
+        "Create `src/pipeline.rs` and wire it into the crate module exports so Pipeline APIs are publicly accessible from `LabkeyClient`.",
+        "Define `GetFileStatusOptions`, `GetFileStatusResponse`, `GetPipelineContainerOptions`, `PipelineContainerResponse`, `GetProtocolsOptions`, `GetProtocolsResponse`, and `StartAnalysisOptions` as `#[non_exhaustive]`; option structs use bon builders and derive `Debug, Clone` only, and response structs derive `Debug, Clone, Deserialize` with `#[serde(rename_all = \"camelCase\")]`.",
+        "Implement `get_file_status`, `get_pipeline_container`, `get_protocols`, and `start_analysis` with exact HTTP methods and actions: POST `pipeline-analysis-getFileStatus.api`, GET `pipeline-getPipelineContainer.api`, POST `pipeline-analysis-getSavedProtocols.api`, POST `pipeline-analysis-startAnalysis.api`.",
+        "For POST Pipeline methods that take inputs, send values as query parameters (not JSON body), support optional `container_path` through options, and use `RequestOptions { timeout, ..Default::default() }` for very long timeout endpoints.",
+        "In `start_analysis`, map `xml_parameters` to `configureXml` and `json_parameters` to `configureJson` where `configureJson` is a JSON-encoded string, and build params via declarative `opt()` plus `Option::map`/`flatten` patterns.",
+        "Add rustdoc for every public type and endpoint method, including `# Errors` and `# Example` sections (`no_run` examples for endpoint methods).",
+        "Add inline unit tests covering URL construction for all four endpoints (including `pipeline-analysis-` prefix cases), `start_analysis` parameter names (`configureXml`, `configureJson`), `PipelineContainerResponse` deserialization (happy/minimal), and edge cases for optional params.",
+        "New source files added to `.gitignore` allow list.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 27,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-028",
+      "title": "Implement report module with session and execute APIs",
+      "description": "As a Rust library user, I want typed Report APIs so that I can create sessions and execute reports/functions with correct payload semantics.",
+      "acceptanceCriteria": [
+        "Create `src/report.rs` and wire it into crate exports so report methods are reachable from `LabkeyClient`.",
+        "Define `CreateSessionOptions`, `CreateSessionResponse`, `DeleteSessionOptions`, `ExecuteOptions`, `ExecuteFunctionOptions`, `ExecuteResponse`, `OutputParam`, `GetSessionsOptions`, and `GetSessionsResponse` as `#[non_exhaustive]` with policy-compliant derives (options: `Debug, Clone` with bon builder; responses: `Debug, Clone, Deserialize` and camelCase serde when applicable).",
+        "Implement endpoints with exact methods/actions: `create_session` POST `reports-createSession.api` with JSON body `{ clientContext }`, `delete_session` POST `reports-deleteSession.api` using query params only, `execute` POST `reports-execute.api`, `execute_function` POST `reports-execute.api`, and `get_sessions` POST `reports-getSessions.api`.",
+        "Enforce request validation rules: `execute` requires at least one of `report_id` or `report_name`; `execute_function` requires `function_name`; failures return library errors without panics.",
+        "Implement input parameter flattening so `input_params` entries become bracket-notation keys in JSON body (`inputParams[x]`, `inputParams[y]`) rather than nested objects.",
+        "Decode `OutputParam` values where `type == \"json\"` from JSON-encoded string to structured `serde_json::Value` in the exposed response model/processing path.",
+        "Add rustdoc for all public types/methods, and endpoint methods include `# Errors` and `# Example` (`no_run`).",
+        "Add inline unit tests for URL construction across all endpoints, input-param flattening behavior, `ExecuteResponse` deserialization with JSON-decoded output params, `delete_session` query-param transport (not JSON), response deserialization happy/minimal paths, and edge cases.",
+        "New source files added to `.gitignore` allow list.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 28,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-029",
+      "title": "Add message, storage, and participant-group modules",
+      "description": "As a Rust library user, I want typed Messaging, Storage, and Participant Group APIs so that I can manage communication and specimen logistics safely.",
+      "acceptanceCriteria": [
+        "Create and export `src/message.rs`, `src/storage.rs`, and `src/participant_group.rs` with public APIs wired into `LabkeyClient`.",
+        "In `message.rs`, define `SendMessageOptions`, `Recipient`, `RecipientType`, `MsgContent`, and `ContentType` using policy-compliant derives and `#[non_exhaustive]`; implement `send_message` as POST `announcements-sendMessage.api` with typed JSON body structs (no `serde_json::json!`).",
+        "In `storage.rs`, define `StorageType` and `StorageCommandResponse` as `#[non_exhaustive]`; implement `create_storage_item`, `update_storage_item`, and `delete_storage_item` as POST to `storage-create.api`, `storage-update.api`, and `storage-delete.api`.",
+        "Ensure `StorageType` wire values match display-name strings exactly, including spaced variants (`\"Physical Location\"`, `\"Primary Storage\"`, `\"Storage Unit Type\"`, `\"Terminal Storage Location\"`).",
+        "In `participant_group.rs`, define `UpdateParticipantGroupOptions` and implement `update_participant_group` as POST `participant-group-updateParticipantGroup.api` with private envelope extraction from `response.group`, returning `LabkeyError::UnexpectedResponse` when missing.",
+        "All endpoint methods accept optional `container_path` through options structs and follow param/body construction policy.",
+        "Add rustdoc for all public enums/structs/methods; endpoint methods include `# Errors` and `# Example` (`no_run`).",
+        "Add inline unit tests covering URL construction for all five endpoints, `RecipientType` serde round-trips plus `variant_count`, `ContentType` serde round-trips plus `variant_count`, `StorageType` serde round-trips for all eight variants plus `variant_count`, participant-group envelope extraction happy/missing paths, response deserialization happy/minimal paths, and edge cases.",
+        "New source files added to `.gitignore` allow list.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 29,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-030",
+      "title": "Implement complete specimen module API surface",
+      "description": "As a Rust library user, I want the full Specimen endpoint set so that I can manage requests and vial operations without falling back to raw HTTP.",
+      "acceptanceCriteria": [
+        "Create `src/specimen.rs`, export it, and implement exactly 11 `LabkeyClient` methods for the Specimen APIs with controller/action names matching the JS client parity list.",
+        "Implement all methods as POST and return typed `serde_json::Value` outputs with envelope extraction where required: `get_open_requests` (`response.requests`), `get_providing_locations` (`response.locations`), `get_repositories` (`response.repositories`), `get_request` (`response.request`), and `get_vials_by_row_id` (`response.vials`).",
+        "Use exact endpoint paths, including `specimen-api-` prefix and special case `remove_vials_from_request` path `specimen-api-removeVialsFromRequest` with no `.api` suffix.",
+        "For `get_repositories` and `get_specimen_web_part_groups`, send POST with no JSON body while preserving required headers/transport behavior; for `get_vials_by_row_id`, body key must be `rowIds`.",
+        "Build request bodies with typed `#[derive(Serialize)]` structs and `#[serde(skip_serializing_if = \"Option::is_none\")]` for optional fields; never use `serde_json::json!`.",
+        "All methods support optional `container_path` via options structs and use private envelope structs with `LabkeyError::UnexpectedResponse` when expected envelope fields are absent.",
+        "Add rustdoc for all public options/methods, with `# Errors` and `# Example` (`no_run`) on each endpoint.",
+        "Add inline unit tests covering URL construction for all 11 endpoints, explicit no-`.api` assertion for `remove_vials_from_request`, representative JSON body construction (`add_specimens_to_request`, `add_vials_to_request`, `get_vials_by_row_id`), envelope extraction happy/missing paths, POST-without-body behavior for `get_repositories` and `get_specimen_web_part_groups`, and edge cases.",
+        "New source files added to `.gitignore` allow list.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 30,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-031",
+      "title": "Implement visualization module endpoints and models",
+      "description": "As a Rust library user, I want typed Visualization APIs so that I can fetch, save, and query visualization metadata with correct URL and payload behavior.",
+      "acceptanceCriteria": [
+        "Create `src/visualization.rs`, export it, and add `IconType`, `Measure`, `Dimension`, `VisualizationResponse`, and `SaveVisualizationResponse` as `#[non_exhaustive]` with policy-compliant derives.",
+        "Implement seven endpoints with exact method/path behavior: `get_visualization` POST `visualization-getVisualization.api`, `get_data` POST `visualization-getData` (no `.api`), `get_measures` GET `visualization-getMeasures.api`, `get_types` GET `visualization-getVisualizationTypes.api`, `save_visualization` POST `visualization-saveVisualization.api`, `get_dimensions` GET `visualization-getDimensions.api`, `get_dimension_values` GET `visualization-getDimensionValues.api`.",
+        "In `get_data`, use default URL from `build_url` when `endpoint` is not set; when `endpoint` is provided, use it verbatim and append params with `visualization.param.*` key prefix (including measure filter conversion logic).",
+        "In `save_visualization`, build JSON body with `json` field containing encoded `visualizationConfig` string as required by LabKey wire format.",
+        "Implement envelope extraction for measures/types/dimensions and `get_dimension_values` extraction of `response.values` only when `response.success == true`, otherwise return `LabkeyError::UnexpectedResponse`.",
+        "Support decoding of `visualization_config` JSON string in `VisualizationResponse` deserialization path and ensure `IconType` serde mappings `AUTO`, `CUSTOM`, `NONE`.",
+        "Add rustdoc for all public types/methods with endpoint `# Errors` and `# Example` (`no_run`).",
+        "Add inline unit tests for `VisualizationResponse` deserialization (including decoded config), `save_visualization` body `json` encoding, `get_data` prefixed param construction, `get_data` URL behavior (no `.api`, custom endpoint verbatim), `Dimension` and `Measure` deserialization, `get_dimension_values` success-gated extraction, `IconType` round-trip serde, and `variant_count`.",
+        "New source files added to `.gitignore` allow list.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 31,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-032",
+      "title": "Add list convenience API and data-integration endpoints",
+      "description": "As a Rust library user, I want List convenience creation and Data Integration transform APIs so that I can configure list domains and trigger transforms with typed responses.",
+      "acceptanceCriteria": [
+        "Create and export `src/list.rs` and `src/di.rs`, with new methods added to `LabkeyClient` and reachable through crate public API.",
+        "In `list.rs`, define `CreateListOptions` and `ListKeyType` (`#[non_exhaustive]`) and implement `create_list` as a convenience wrapper that delegates to `create_domain` without direct HTTP calls.",
+        "`create_list` must map `ListKeyType::IntList` to `DomainKind::IntList` and `ListKeyType::VarList` to `DomainKind::VarList`, while setting `domain_design.name` and `options.keyName` in delegated `CreateDomainOptions`.",
+        "In `di.rs`, define `RunTransformOptions`, `RunTransformResponse`, `ResetTransformStateOptions`, `ResetTransformStateResponse`, `UpdateTransformConfigurationOptions`, `UpdateTransformConfigurationResponse`, and `TransformConfig` as `#[non_exhaustive]` with response derives/policies and camelCase serde mappings.",
+        "Implement DI endpoints with exact paths and no `.api` suffix: POST `dataintegration-runTransform`, POST `dataintegration-resetTransformState`, POST `dataintegration-UpdateTransformConfiguration` (capital U preserved).",
+        "All public endpoint methods include optional `container_path` handling, typed JSON body structs when needed, and no `serde_json::json!`.",
+        "Add rustdoc for all public types/methods, including endpoint `# Errors` and `# Example` (`no_run`).",
+        "Add inline unit tests for `create_list` delegation content (kind/keyName/domain name), `ListKeyType` `variant_count`, DI response deserialization for all three endpoints (happy/minimal), DI URL construction edge cases (controller name, no suffix, capital U action), and additional edge-case validation.",
+        "New source files added to `.gitignore` allow list.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 32,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-033",
+      "title": "Review iteration D: full API parity and policy audit",
+      "description": "As a maintainer, I want a full parity and policy audit against upstream LabKey clients so that missing coverage and contract violations are visible before release.",
+      "acceptanceCriteria": [
+        "Audit JS public API endpoints across upstream modules (`Query.ts`, `Security.ts`, `Domain.ts`, `Experiment.ts`, and peer public API files) and produce a complete implemented-vs-skipped checklist tied to current Rust methods.",
+        "Audit Java client command classes under `src/org/labkey/remoteapi/` and produce a complete parity checklist tied to Rust implementation or explicit skip status.",
+        "Verify crate-wide policy conformance: `#[non_exhaustive]` usage per options/response/enum rules, response derive sets (`Debug, Clone, Deserialize` and no unnecessary `Serialize`), enum trait sets and `variant_count` tests for server vocabularies, endpoint docs with `# Errors` and `# Example` (`no_run`).",
+        "Document all discrepancies found; if more than five discrepancies exist, list all of them but only apply minimal fixes for the most critical subset (no new endpoint additions, no broad refactors, no feature additions).",
+        "Apply only scope-allowed corrective changes for policy violations and keep modifications bisectable.",
+        "Ensure any audit artifacts are recorded in existing tracked project files without adding unauthorized documentation files.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 33,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-034",
+      "title": "Enhance client configuration for UA, proxy, and cert handling",
+      "description": "As a Rust library user, I want configurable client networking options so that I can set user agent, proxy, and TLS behavior without custom forks.",
+      "acceptanceCriteria": [
+        "Modify `src/client.rs` to add `user_agent: Option<String>`, `accept_self_signed_certs: bool`, and `proxy_url: Option<String>` to `ClientConfig` with defaults: UA `None`, self-signed false, proxy `None`.",
+        "Implement `ClientConfig::new(base_url, credential, container_path)` constructor and builder-style setters `with_user_agent`, `with_proxy_url`, `with_accept_self_signed_certs` returning updated config values.",
+        "Update `LabkeyClient::new` to configure `reqwest::Client::builder()` using config options: default user agent is `labkey-rs/{version}` from `env!(\"CARGO_PKG_VERSION\")` when custom UA is absent; custom UA overrides default.",
+        "Configure proxy when `proxy_url` is present via `reqwest::Proxy::all(url)` and allow invalid certs when `accept_self_signed_certs` is true; do not duplicate user-agent setting in `prepare_request`.",
+        "Persist configuration data needed for one-off client rebuild behavior (including no-follow-redirects flow) so rebuilt clients retain the new config semantics.",
+        "Add rustdoc for public config fields/constructors/setters and any changed public methods; endpoint docs remain policy-compliant where applicable.",
+        "Add/update tests validating: custom user agent is applied, default UA includes crate version, `accept_self_signed_certs: true` construction succeeds, proxy-url construction succeeds, and `ClientConfig::new` defaults are correct and stable.",
+        "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
+      ],
+      "priority": 34,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

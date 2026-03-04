@@ -120,26 +120,29 @@ sloc:
 setup: clone-refs
     @echo ""
     @echo "Project setup complete!"
-    @echo "Reference repo: .agents/repos/labkey-api-js/"
+    @echo "Reference repos: .agents/repos/labkey-api-js/ and .agents/repos/labkey-api-java/"
 
 # === Reference Repositories ===
 
-# Clone the upstream JS client for reference
+# Clone the upstream JS and Java clients for reference
 clone-refs:
-    @echo "Cloning reference repository into .agents/repos/..."
+    @echo "Cloning reference repositories into .agents/repos/..."
     @mkdir -p .agents/repos
     @echo "Cloning labkey-api-js (upstream JS/TS client)..."
     git clone https://github.com/LabKey/labkey-api-js.git .agents/repos/labkey-api-js || echo "labkey-api-js already exists, skipping"
-    @echo "Reference repository cloned to .agents/repos/"
+    @echo "Cloning labkey-api-java (upstream Java client)..."
+    git clone https://github.com/LabKey/labkey-api-java.git .agents/repos/labkey-api-java || echo "labkey-api-java already exists, skipping"
+    @echo "Reference repositories cloned to .agents/repos/"
 
-# Update reference repository to latest
+# Update reference repositories to latest
 update-refs:
-    @echo "Updating reference repository..."
+    @echo "Updating reference repositories..."
     cd .agents/repos/labkey-api-js && git pull || true
-    @echo "Reference repository updated"
+    cd .agents/repos/labkey-api-java && git pull || true
+    @echo "Reference repositories updated"
 
-# Remove reference repository
+# Remove reference repositories
 clean-refs:
-    @echo "Removing reference repository..."
+    @echo "Removing reference repositories..."
     rm -rf .agents/repos
-    @echo "Reference repository removed"
+    @echo "Reference repositories removed"
