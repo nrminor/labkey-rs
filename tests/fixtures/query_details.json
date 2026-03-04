@@ -1,0 +1,109 @@
+{
+  "schemaName": "lists",
+  "name": "People",
+  "title": "People",
+  "description": "List of people",
+  "canEdit": true,
+  "canEditSharedViews": false,
+  "isInherited": false,
+  "isMetadataOverrideable": true,
+  "isTemporary": false,
+  "isUserDefined": true,
+  "viewDataUrl": "/labkey/query/executeQuery.view?schemaName=lists&queryName=People",
+  "titleColumn": "Name",
+  "columns": [
+    {
+      "name": "RowId",
+      "fieldKey": "RowId",
+      "caption": "Row ID",
+      "shortCaption": "ID",
+      "jsonType": "int",
+      "sqlType": "INTEGER",
+      "hidden": false,
+      "nullable": false,
+      "readOnly": true,
+      "userEditable": false,
+      "facetingBehaviorType": "automatic"
+    },
+    {
+      "name": "CreatedBy",
+      "fieldKey": "CreatedBy",
+      "caption": "Created By",
+      "jsonType": "int",
+      "sqlType": "INTEGER",
+      "lookup": {
+        "schemaName": "core",
+        "queryName": "Users",
+        "keyColumn": "UserId",
+        "displayColumn": "DisplayName"
+      }
+    }
+  ],
+  "defaultView": {
+    "columns": [
+      {
+        "name": "RowId",
+        "fieldKey": "RowId"
+      }
+    ]
+  },
+  "importTemplates": [
+    {
+      "label": "TSV Template",
+      "url": "/labkey/query/template.view?schemaName=lists&queryName=People"
+    }
+  ],
+  "indices": {
+    "pk_people": {
+      "columns": [
+        "RowId"
+      ],
+      "type": "PRIMARY"
+    }
+  },
+  "views": [
+    {
+      "name": "All",
+      "label": "All",
+      "default": true,
+      "deletable": false,
+      "editable": true,
+      "hidden": false,
+      "inherit": false,
+      "revertable": false,
+      "savable": true,
+      "session": false,
+      "shared": true,
+      "containerPath": "/MyProject/MyFolder",
+      "viewDataUrl": "/labkey/query/executeQuery.view?schemaName=lists&queryName=People&query.viewName=All",
+      "analyticsProviders": [],
+      "columns": [
+        {
+          "fieldKey": "Name",
+          "key": "Name",
+          "name": "Name"
+        }
+      ],
+      "fields": [
+        {
+          "name": "Name",
+          "fieldKey": "Name"
+        }
+      ],
+      "filter": [
+        {
+          "fieldKey": "Status",
+          "op": "eq",
+          "value": "Active"
+        }
+      ],
+      "sort": [
+        {
+          "dir": "ASC",
+          "fieldKey": "Name"
+        }
+      ]
+    }
+  ],
+  "moduleName": "lists"
+}

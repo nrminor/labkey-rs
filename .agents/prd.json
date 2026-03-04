@@ -118,8 +118,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented select-distinct and query-details read support in src/query.rs by adding SelectDistinctOptions/SelectDistinctResponse and GetQueryDetailsOptions/QueryDetailsResponse with the required supporting vocabulary types (QueryDetailsColumn, QueryLookup, QueryView, QueryViewColumn, QueryViewFilter, QueryViewSort, QueryImportTemplate, QueryIndex). Added QueryDetailsColumn #[serde(flatten)] extra for unknown fields and modeled response structs as #[non_exhaustive] with camelCase serde mapping. Implemented LabkeyClient::select_distinct_rows and LabkeyClient::get_query_details using query-selectDistinct.api and query-getQueryDetails.api, including container override support, declarative optional parameter shaping, repeated fields/viewName parameter handling, and max_rows = -1 mapping to query.showRows=all. Added tests/fixtures/query_details.json and expanded unit/integration coverage for endpoint URL and request params, select-distinct deserialization, full fixture deserialization for query details, QueryDetailsColumn optional-field present/absent behavior, top-level extra-field flatten behavior, custom dataRegionName handling, and maxRows/showRows edge behavior. Added explicit .gitignore allow-list entry for the new fixture, solicited feedback from nick-isms/testing-guru/semver-nag, incorporated test-rigor improvements, and verified all quality gates with just check before and after feedback updates."
     },
     {
       "id": "US-007",

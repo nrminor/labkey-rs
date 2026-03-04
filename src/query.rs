@@ -519,6 +519,349 @@ pub struct SaveRowsResponse {
     pub result: Vec<ModifyRowsResults>,
 }
 
+/// Options for [`LabkeyClient::select_distinct_rows`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct SelectDistinctOptions {
+    /// The schema containing the target query.
+    pub schema_name: String,
+    /// The query or table name.
+    pub query_name: String,
+    /// A single column for which to request distinct values.
+    pub column: String,
+    /// Override the client's default container path for this request.
+    pub container_path: Option<String>,
+    /// Prefix for query-region parameters. Defaults to `"query"` when omitted.
+    pub data_region_name: Option<String>,
+    /// Filters to apply to the query.
+    pub filter_array: Option<Vec<Filter>>,
+    /// Sort specification (for example, `"Name"` or `"-Created"`).
+    pub sort: Option<String>,
+    /// Named view to use.
+    pub view_name: Option<String>,
+    /// Maximum number of rows to return. Use `-1` to request all rows.
+    pub max_rows: Option<i32>,
+    /// Container filter scope.
+    pub container_filter: Option<ContainerFilter>,
+    /// Whether to ignore the selected view's default filters.
+    pub ignore_filter: Option<bool>,
+    /// Parameters for parameterized queries.
+    pub parameters: Option<HashMap<String, String>>,
+}
+
+/// Response from [`LabkeyClient::select_distinct_rows`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct SelectDistinctResponse {
+    /// Query name included in the response.
+    pub query_name: String,
+    /// Schema name included in the response.
+    pub schema_name: String,
+    /// Distinct values returned for the requested column.
+    pub values: Vec<serde_json::Value>,
+}
+
+/// Options for [`LabkeyClient::get_query_details`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct GetQueryDetailsOptions {
+    /// The schema containing the target query.
+    pub schema_name: String,
+    /// The query or table name.
+    pub query_name: String,
+    /// Override the client's default container path for this request.
+    pub container_path: Option<String>,
+    /// Include custom view details for the provided view names.
+    pub view_name: Option<Vec<String>>,
+    /// Include only metadata for the provided field keys.
+    pub fields: Option<Vec<String>>,
+    /// Include only columns from the specified foreign key query.
+    pub fk: Option<String>,
+    /// Initialize the view from default if it does not exist.
+    pub initialize_missing_view: Option<bool>,
+    /// Include trigger metadata in the response.
+    pub include_triggers: Option<bool>,
+}
+
+/// Lookup metadata attached to a query column.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct QueryLookup {
+    /// Optional container identifier.
+    #[serde(default)]
+    pub container: Option<String>,
+    /// Optional container path.
+    #[serde(default)]
+    pub container_path: Option<String>,
+    /// Display column for lookup resolution.
+    #[serde(default)]
+    pub display_column: Option<String>,
+    /// Whether the lookup is marked public in server metadata.
+    #[serde(default)]
+    pub is_public: Option<bool>,
+    /// Key column in the lookup table.
+    #[serde(default)]
+    pub key_column: Option<String>,
+    /// Query name for the lookup target.
+    #[serde(default)]
+    pub query_name: Option<String>,
+    /// Schema name for the lookup target.
+    #[serde(default)]
+    pub schema_name: Option<String>,
+}
+
+/// Column metadata returned by [`LabkeyClient::get_query_details`].
+// The LabKey server response exposes many independent boolean attributes for
+// query-detail columns; preserving the wire shape keeps parity and avoids
+// collapsing semantics into custom enums.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct QueryDetailsColumn {
+    /// Internal column name.
+    pub name: String,
+    /// Field key.
+    pub field_key: serde_json::Value,
+    /// Human-readable caption.
+    #[serde(default)]
+    pub caption: Option<String>,
+    /// Short caption for compact displays.
+    #[serde(default)]
+    pub short_caption: Option<String>,
+    /// JSON type name.
+    #[serde(default)]
+    pub json_type: Option<String>,
+    /// SQL type name.
+    #[serde(default)]
+    pub sql_type: Option<String>,
+    /// Whether the column is hidden.
+    #[serde(default)]
+    pub hidden: bool,
+    /// Whether the column allows null values.
+    #[serde(default)]
+    pub nullable: bool,
+    /// Whether the column is read-only.
+    #[serde(default)]
+    pub read_only: bool,
+    /// Whether the column is user-editable.
+    #[serde(default)]
+    pub user_editable: bool,
+    /// Lookup metadata for the column, when present.
+    #[serde(default)]
+    pub lookup: Option<QueryLookup>,
+    /// Additional server-provided fields not modeled explicitly.
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
+
+/// View column entry in [`QueryView`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct QueryViewColumn {
+    /// Field key for the view column.
+    pub field_key: String,
+    /// Internal key for the view column.
+    pub key: String,
+    /// Name of the view column.
+    pub name: String,
+}
+
+/// View filter entry in [`QueryView`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct QueryViewFilter {
+    /// Field key used by the filter.
+    pub field_key: String,
+    /// Filter operator.
+    pub op: String,
+    /// Filter value.
+    pub value: String,
+}
+
+/// View sort entry in [`QueryView`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct QueryViewSort {
+    /// Sort direction.
+    pub dir: String,
+    /// Field key being sorted.
+    pub field_key: String,
+}
+
+/// Import template metadata in [`QueryDetailsResponse`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct QueryImportTemplate {
+    /// Display label for the template.
+    pub label: String,
+    /// URL to download the template.
+    pub url: String,
+}
+
+/// Index metadata in [`QueryDetailsResponse`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct QueryIndex {
+    /// Column names in this index.
+    pub columns: Vec<String>,
+    /// Index type string.
+    #[serde(rename = "type")]
+    pub type_: String,
+}
+
+/// Saved-view metadata in [`QueryDetailsResponse`].
+// The LabKey server view model contains several independent flags that are
+// intentionally modeled as booleans for response fidelity.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct QueryView {
+    /// Analytics providers for this view.
+    #[serde(default)]
+    pub analytics_providers: Vec<serde_json::Value>,
+    /// Explicit columns in this view.
+    #[serde(default)]
+    pub columns: Vec<QueryViewColumn>,
+    /// Container filter associated with this view.
+    #[serde(default)]
+    pub container_filter: Option<serde_json::Value>,
+    /// Container path where this view is stored.
+    #[serde(default)]
+    pub container_path: Option<String>,
+    /// Whether this is the default view.
+    #[serde(rename = "default", default)]
+    pub is_default: bool,
+    /// Whether the view can be deleted.
+    #[serde(default)]
+    pub deletable: bool,
+    /// Whether the view can be edited.
+    #[serde(default)]
+    pub editable: bool,
+    /// Field metadata for this view.
+    #[serde(default)]
+    pub fields: Vec<QueryDetailsColumn>,
+    /// Filters applied by this view.
+    #[serde(default)]
+    pub filter: Vec<QueryViewFilter>,
+    /// Whether the view is hidden.
+    #[serde(default)]
+    pub hidden: bool,
+    /// Whether the view is inherited.
+    #[serde(default)]
+    pub inherit: bool,
+    /// View label.
+    #[serde(default)]
+    pub label: Option<String>,
+    /// View name.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// View owner display name.
+    #[serde(default)]
+    pub owner: Option<String>,
+    /// Whether the view can be reverted.
+    #[serde(default)]
+    pub revertable: bool,
+    /// Whether the view can be saved.
+    #[serde(default)]
+    pub savable: bool,
+    /// Whether this is a session view.
+    #[serde(default)]
+    pub session: bool,
+    /// Whether the view is shared.
+    #[serde(default)]
+    pub shared: bool,
+    /// Sort descriptors for this view.
+    #[serde(default)]
+    pub sort: Vec<QueryViewSort>,
+    /// URL for opening data with this view.
+    #[serde(default)]
+    pub view_data_url: Option<String>,
+}
+
+/// Default-view block in [`QueryDetailsResponse`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct QueryDefaultView {
+    /// Columns included in the default view.
+    #[serde(default)]
+    pub columns: Vec<QueryDetailsColumn>,
+}
+
+/// Response from [`LabkeyClient::get_query_details`].
+// The query-details payload includes multiple independent capability flags from
+// the server; bool fields preserve those semantics directly.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct QueryDetailsResponse {
+    /// Whether the query is editable.
+    #[serde(default)]
+    pub can_edit: bool,
+    /// Whether shared views are editable.
+    #[serde(default)]
+    pub can_edit_shared_views: bool,
+    /// Columns for this query.
+    #[serde(default)]
+    pub columns: Vec<QueryDetailsColumn>,
+    /// The query default view details.
+    #[serde(default)]
+    pub default_view: Option<QueryDefaultView>,
+    /// Query description.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// URL for editing query definition.
+    #[serde(default)]
+    pub edit_definition_url: Option<String>,
+    /// Import templates exposed by the query.
+    #[serde(default)]
+    pub import_templates: Vec<QueryImportTemplate>,
+    /// Index metadata keyed by index name.
+    #[serde(default)]
+    pub indices: HashMap<String, QueryIndex>,
+    /// Whether the query is inherited.
+    #[serde(default)]
+    pub is_inherited: bool,
+    /// Whether metadata is overrideable.
+    #[serde(default)]
+    pub is_metadata_overrideable: bool,
+    /// Whether the query is temporary.
+    #[serde(default)]
+    pub is_temporary: bool,
+    /// Whether the query is user-defined.
+    #[serde(default)]
+    pub is_user_defined: bool,
+    /// Query name.
+    pub name: String,
+    /// Schema name.
+    pub schema_name: String,
+    /// Query title.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Title column field key.
+    #[serde(default)]
+    pub title_column: Option<String>,
+    /// URL for loading view data.
+    #[serde(default)]
+    pub view_data_url: Option<String>,
+    /// Saved views available for this query.
+    #[serde(default)]
+    pub views: Vec<QueryView>,
+    /// Additional server-provided fields not modeled explicitly.
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
+
 /// Encode a string to avoid web application firewall false positives.
 ///
 /// `LabKey` endpoints that accept SQL or script content use this encoding to
@@ -729,6 +1072,162 @@ impl LabkeyClient {
             for (k, v) in parameters {
                 params.push((format!("{dr}.param.{k}"), v.clone()));
             }
+        }
+
+        self.get(url, &params).await
+    }
+
+    /// Select distinct values for a query column.
+    ///
+    /// Sends a request to `query-selectDistinct.api` and returns distinct
+    /// values for one column. The request defaults to a query region prefix of
+    /// `query`, matching `LabKey`'s JS client behavior.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the HTTP request fails, the server returns
+    /// an error response, or the response body cannot be deserialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::query::SelectDistinctOptions;
+    ///
+    /// let response = client
+    ///     .select_distinct_rows(
+    ///         SelectDistinctOptions::builder()
+    ///             .schema_name("lists".to_string())
+    ///             .query_name("People".to_string())
+    ///             .column("Gender".to_string())
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("{} distinct values", response.values.len());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn select_distinct_rows(
+        &self,
+        options: SelectDistinctOptions,
+    ) -> Result<SelectDistinctResponse, LabkeyError> {
+        let url = self.build_url(
+            "query",
+            "selectDistinct.api",
+            options.container_path.as_deref(),
+        );
+        let dr = options
+            .data_region_name
+            .unwrap_or_else(|| "query".to_string());
+
+        let mut params: Vec<(String, String)> = [
+            Some(("dataRegionName".into(), dr.clone())),
+            Some(("schemaName".into(), options.schema_name)),
+            Some((format!("{dr}.queryName"), options.query_name)),
+            Some((format!("{dr}.columns"), options.column)),
+            opt(format!("{dr}.sort"), options.sort),
+            opt(format!("{dr}.viewName"), options.view_name),
+            opt(
+                "containerFilter",
+                options.container_filter.map(container_filter_to_string),
+            ),
+            options
+                .ignore_filter
+                .and_then(|v| v.then(|| (format!("{dr}.ignoreFilter"), "1".into()))),
+            match options.max_rows {
+                Some(max) if max < 0 => Some((format!("{dr}.showRows"), "all".into())),
+                Some(max) => Some(("maxRows".into(), max.to_string())),
+                None => None,
+            },
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        if let Some(filters) = &options.filter_array {
+            params.extend(encode_filters(filters, dr.as_str()));
+        }
+        if let Some(parameters) = &options.parameters {
+            for (k, v) in parameters {
+                params.push((format!("{dr}.param.{k}"), v.clone()));
+            }
+        }
+
+        self.get(url, &params).await
+    }
+
+    /// Fetch schema/query metadata and view details.
+    ///
+    /// Sends a GET request to `query-getQueryDetails.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the HTTP request fails, the server returns
+    /// an error response, or the response body cannot be deserialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::query::GetQueryDetailsOptions;
+    ///
+    /// let details = client
+    ///     .get_query_details(
+    ///         GetQueryDetailsOptions::builder()
+    ///             .schema_name("lists".to_string())
+    ///             .query_name("People".to_string())
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("Query: {}.{}", details.schema_name, details.name);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_query_details(
+        &self,
+        options: GetQueryDetailsOptions,
+    ) -> Result<QueryDetailsResponse, LabkeyError> {
+        let url = self.build_url(
+            "query",
+            "getQueryDetails.api",
+            options.container_path.as_deref(),
+        );
+
+        let mut params: Vec<(String, String)> = [
+            Some(("schemaName".into(), options.schema_name)),
+            Some(("queryName".into(), options.query_name)),
+            opt("fk", options.fk),
+            opt("initializeMissingView", options.initialize_missing_view),
+            opt("includeTriggers", options.include_triggers),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        if let Some(fields) = &options.fields {
+            params.extend(fields.iter().cloned().map(|field| ("fields".into(), field)));
+        }
+        if let Some(view_names) = &options.view_name {
+            params.extend(
+                view_names
+                    .iter()
+                    .cloned()
+                    .map(|view_name| ("viewName".into(), view_name)),
+            );
         }
 
         self.get(url, &params).await
@@ -1356,8 +1855,130 @@ mod tests {
     }
 
     #[test]
+    fn select_distinct_response_deserializes() {
+        let json = serde_json::json!({
+            "queryName": "People",
+            "schemaName": "lists",
+            "values": ["F", "M", null]
+        });
+
+        let response: SelectDistinctResponse =
+            serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(response.query_name, "People");
+        assert_eq!(response.schema_name, "lists");
+        assert_eq!(response.values.len(), 3);
+    }
+
+    #[test]
+    fn query_details_column_deserializes_optional_fields_present() {
+        let json = serde_json::json!({
+            "name": "Project",
+            "fieldKey": "Project",
+            "caption": "Project",
+            "shortCaption": "Project",
+            "jsonType": "string",
+            "sqlType": "VARCHAR",
+            "nullable": false,
+            "readOnly": true,
+            "lookup": {
+                "schemaName": "core",
+                "queryName": "Projects",
+                "keyColumn": "RowId"
+            },
+            "customProp": "extra"
+        });
+
+        let column: QueryDetailsColumn = serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(column.name, "Project");
+        assert_eq!(column.field_key, serde_json::json!("Project"));
+        assert_eq!(column.caption.as_deref(), Some("Project"));
+        assert!(column.read_only);
+        assert_eq!(
+            column
+                .lookup
+                .as_ref()
+                .and_then(|lookup| lookup.schema_name.as_deref()),
+            Some("core")
+        );
+        assert_eq!(
+            column.extra.get("customProp"),
+            Some(&serde_json::Value::String("extra".to_string()))
+        );
+    }
+
+    #[test]
+    fn query_details_column_deserializes_optional_fields_absent() {
+        let json = serde_json::json!({
+            "name": "RowId",
+            "fieldKey": "RowId"
+        });
+
+        let column: QueryDetailsColumn = serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(column.name, "RowId");
+        assert_eq!(column.field_key, serde_json::json!("RowId"));
+        assert!(column.caption.is_none());
+        assert!(column.short_caption.is_none());
+        assert!(column.lookup.is_none());
+        assert!(column.extra.is_empty());
+    }
+
+    #[test]
+    fn query_details_response_deserializes_fixture() {
+        let fixture = include_str!("../tests/fixtures/query_details.json");
+        let response: QueryDetailsResponse =
+            serde_json::from_str(fixture).expect("fixture should deserialize");
+
+        assert_eq!(response.schema_name, "lists");
+        assert_eq!(response.name, "People");
+        assert_eq!(response.columns.len(), 2);
+        assert_eq!(response.import_templates.len(), 1);
+        assert_eq!(response.indices.len(), 1);
+        assert_eq!(response.views.len(), 1);
+        assert_eq!(
+            response
+                .columns
+                .first()
+                .and_then(|column| column.extra.get("facetingBehaviorType")),
+            Some(&serde_json::Value::String("automatic".to_string()))
+        );
+        assert_eq!(
+            response.extra.get("moduleName"),
+            Some(&serde_json::Value::String("lists".to_string()))
+        );
+    }
+
+    #[test]
+    fn query_details_response_collects_unknown_top_level_fields_in_extra() {
+        let json = serde_json::json!({
+            "schemaName": "lists",
+            "name": "People",
+            "customMetadata": {"enabled": true}
+        });
+
+        let response: QueryDetailsResponse =
+            serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(
+            response.extra.get("customMetadata"),
+            Some(&serde_json::json!({"enabled": true}))
+        );
+    }
+
+    #[test]
     fn mutation_endpoint_urls_match_expected_actions() {
         let client = test_client("https://labkey.example.com/labkey", "/MyProject/MyFolder");
+
+        assert_eq!(
+            client
+                .build_url("query", "selectDistinct.api", Some("/Alt/Container"))
+                .as_str(),
+            "https://labkey.example.com/labkey/Alt/Container/query-selectDistinct.api"
+        );
+        assert_eq!(
+            client
+                .build_url("query", "getQueryDetails.api", Some("/Alt/Container"))
+                .as_str(),
+            "https://labkey.example.com/labkey/Alt/Container/query-getQueryDetails.api"
+        );
 
         assert_eq!(
             client

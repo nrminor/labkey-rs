@@ -37,6 +37,7 @@
 !/tests/client_integration.rs
 !/tests/fixtures
 !/tests/fixtures/api_error.json
+!/tests/fixtures/query_details.json
 
 # === Allowed: GitHub workflows ===
 !/.github

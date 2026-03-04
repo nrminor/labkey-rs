@@ -6,9 +6,11 @@ use common::{LabkeyError, Mock, MockServer, ResponseTemplate, fixture, test_clie
 #[cfg(feature = "internal-test-support")]
 use labkey_rs::client::__internal_test_support;
 use labkey_rs::common::AuditBehavior;
+use labkey_rs::filter::Filter;
 use labkey_rs::query::{
-    CommandType, DeleteRowsOptions, ExecuteSqlOptions, InsertRowsOptions, MoveRowsOptions,
-    SaveRowsCommand, SaveRowsOptions, SelectRowsOptions, TruncateTableOptions, UpdateRowsOptions,
+    CommandType, DeleteRowsOptions, ExecuteSqlOptions, GetQueryDetailsOptions, InsertRowsOptions,
+    MoveRowsOptions, SaveRowsCommand, SaveRowsOptions, SelectDistinctOptions, SelectRowsOptions,
+    TruncateTableOptions, UpdateRowsOptions,
 };
 use url::Url;
 use wiremock::matchers::{
@@ -83,6 +85,179 @@ async fn execute_sql_sends_expected_post_request_shape() {
         .expect("request should succeed");
 
     assert_eq!(response.row_count, 0);
+}
+
+#[tokio::test]
+async fn select_distinct_rows_sends_expected_get_request_shape() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/query-selectDistinct.api"))
+        .and(query_param("dataRegionName", "query"))
+        .and(query_param("schemaName", "lists"))
+        .and(query_param("query.queryName", "People"))
+        .and(query_param("query.columns", "Gender"))
+        .and(query_param("query.showRows", "all"))
+        .and(query_param("query.param.Site", "A"))
+        .and(query_param("query.ignoreFilter", "1"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "queryName": "People",
+            "values": ["F", "M"]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .select_distinct_rows(
+            SelectDistinctOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .column("Gender".to_string())
+                .container_path("/Alt/Container".to_string())
+                .max_rows(-1)
+                .ignore_filter(true)
+                .parameters(std::iter::once(("Site".to_string(), "A".to_string())).collect())
+                .build(),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(response.values.len(), 2);
+}
+
+#[tokio::test]
+async fn get_query_details_sends_expected_get_request_shape() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/query-getQueryDetails.api"))
+        .and(query_param("schemaName", "lists"))
+        .and(query_param("queryName", "People"))
+        .and(query_param("fields", "Name"))
+        .and(query_param("viewName", "All"))
+        .and(query_param("fk", "CreatedBy"))
+        .and(query_param("initializeMissingView", "true"))
+        .and(query_param("includeTriggers", "false"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "name": "People",
+            "columns": [{"name": "RowId", "fieldKey": "RowId"}],
+            "views": []
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .get_query_details(
+            GetQueryDetailsOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .container_path("/Alt/Container".to_string())
+                .fields(vec!["Name".to_string()])
+                .view_name(vec!["All".to_string()])
+                .fk("CreatedBy".to_string())
+                .initialize_missing_view(true)
+                .include_triggers(false)
+                .build(),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(response.schema_name, "lists");
+    assert_eq!(response.name, "People");
+}
+
+#[tokio::test]
+async fn select_distinct_rows_supports_custom_data_region_and_positive_max_rows() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/query-selectDistinct.api"))
+        .and(query_param("dataRegionName", "grid"))
+        .and(query_param("schemaName", "lists"))
+        .and(query_param("grid.queryName", "People"))
+        .and(query_param("grid.columns", "Gender"))
+        .and(query_param("maxRows", "10"))
+        .and(query_param("grid.param.Site", "A"))
+        .and(query_param("grid.Status~eq", "Active"))
+        .and(query_param("grid.ignoreFilter", "1"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "queryName": "People",
+            "values": ["F"]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .select_distinct_rows(
+            SelectDistinctOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .column("Gender".to_string())
+                .container_path("/Alt/Container".to_string())
+                .data_region_name("grid".to_string())
+                .max_rows(10)
+                .ignore_filter(true)
+                .parameters(std::iter::once(("Site".to_string(), "A".to_string())).collect())
+                .filter_array(vec![Filter::equal("Status", "Active")])
+                .build(),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(response.values, vec![serde_json::json!("F")]);
+}
+
+#[tokio::test]
+async fn get_query_details_supports_multiple_fields_and_view_names() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/query-getQueryDetails.api"))
+        .and(query_param("schemaName", "lists"))
+        .and(query_param("queryName", "People"))
+        .and(query_param("fields", "Name"))
+        .and(query_param("fields", "Status"))
+        .and(query_param("viewName", "All"))
+        .and(query_param("viewName", "Mine"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "name": "People",
+            "columns": [{"name": "RowId", "fieldKey": "RowId"}],
+            "views": []
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .get_query_details(
+            GetQueryDetailsOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .container_path("/Alt/Container".to_string())
+                .fields(vec!["Name".to_string(), "Status".to_string()])
+                .view_name(vec!["All".to_string(), "Mine".to_string()])
+                .build(),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(response.schema_name, "lists");
+    assert_eq!(response.name, "People");
 }
 
 #[tokio::test]
