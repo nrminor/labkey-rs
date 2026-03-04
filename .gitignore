@@ -38,6 +38,7 @@
 !/tests/fixtures
 !/tests/fixtures/api_error.json
 !/tests/fixtures/query_details.json
+!/tests/fixtures/get_schemas.json
 
 # === Allowed: GitHub workflows ===
 !/.github

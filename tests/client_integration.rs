@@ -8,9 +8,9 @@ use labkey_rs::client::__internal_test_support;
 use labkey_rs::common::AuditBehavior;
 use labkey_rs::filter::Filter;
 use labkey_rs::query::{
-    CommandType, DeleteRowsOptions, ExecuteSqlOptions, GetQueryDetailsOptions, InsertRowsOptions,
-    MoveRowsOptions, SaveRowsCommand, SaveRowsOptions, SelectDistinctOptions, SelectRowsOptions,
-    TruncateTableOptions, UpdateRowsOptions,
+    CommandType, DeleteRowsOptions, ExecuteSqlOptions, GetQueriesOptions, GetQueryDetailsOptions,
+    GetSchemasOptions, InsertRowsOptions, MoveRowsOptions, SaveRowsCommand, SaveRowsOptions,
+    SelectDistinctOptions, SelectRowsOptions, TruncateTableOptions, UpdateRowsOptions,
 };
 use url::Url;
 use wiremock::matchers::{
@@ -258,6 +258,181 @@ async fn get_query_details_supports_multiple_fields_and_view_names() {
 
     assert_eq!(response.schema_name, "lists");
     assert_eq!(response.name, "People");
+}
+
+#[tokio::test]
+async fn get_queries_sends_expected_params_and_deserializes_nested_queries() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/query-getQueries.api"))
+        .and(query_param("schemaName", "lists"))
+        .and(query_param("includeColumns", "true"))
+        .and(query_param("includeSystemQueries", "false"))
+        .and(query_param("includeTitle", "true"))
+        .and(query_param("includeUserQueries", "true"))
+        .and(query_param("includeViewDataUrl", "false"))
+        .and(query_param("queryDetailColumns", "true"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "queries": [{
+                "name": "People",
+                "title": "People List",
+                "columns": [{"name": "RowId", "caption": "Row Id"}],
+                "canEdit": true,
+                "canEditSharedViews": false,
+                "hidden": false,
+                "inherit": true,
+                "isInherited": false,
+                "isMetadataOverrideable": true,
+                "isUserDefined": true,
+                "snapshot": false,
+                "viewDataUrl": "/list-grid.view?name=People"
+            }]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .get_queries(
+            GetQueriesOptions::builder()
+                .schema_name("lists".to_string())
+                .container_path("/Alt/Container".to_string())
+                .include_columns(true)
+                .include_system_queries(false)
+                .include_title(true)
+                .include_user_queries(true)
+                .include_view_data_url(false)
+                .query_detail_columns(true)
+                .build(),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(response.schema_name, "lists");
+    assert_eq!(response.queries.len(), 1);
+    assert_eq!(response.queries[0].name, "People");
+}
+
+#[tokio::test]
+async fn get_schemas_deserializes_schema_keyed_fixture_response() {
+    let server = MockServer::start().await;
+    let payload: serde_json::Value = fixture("get_schemas.json");
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/query-getSchemas.api"))
+        .and(query_param("includeHidden", "false"))
+        .and(query_param("schemaName", "lists"))
+        .and(query_param("apiVersion", "17.1"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(payload))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .get_schemas(
+            GetSchemasOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .include_hidden(false)
+                .schema_name("lists".to_string())
+                .api_version("17.1".to_string())
+                .build(),
+        )
+        .await
+        .expect("request should succeed");
+
+    let schemas = response
+        .as_object()
+        .expect("get_schemas should return object keyed by schema name");
+    assert!(schemas.contains_key("lists"));
+    assert!(schemas.contains_key("core"));
+}
+
+#[tokio::test]
+async fn get_queries_supports_minimal_required_options() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/MyProject/MyFolder/query-getQueries.api"))
+        .and(query_param("schemaName", "lists"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "queries": []
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .get_queries(
+            GetQueriesOptions::builder()
+                .schema_name("lists".to_string())
+                .build(),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(response.schema_name, "lists");
+    assert!(response.queries.is_empty());
+}
+
+#[tokio::test]
+async fn get_queries_json_error_maps_to_api_error() {
+    let server = MockServer::start().await;
+    let error_body: serde_json::Value = fixture("api_error.json");
+
+    Mock::given(method("GET"))
+        .and(path("/MyProject/MyFolder/query-getQueries.api"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(error_body))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client
+        .get_queries(
+            GetQueriesOptions::builder()
+                .schema_name("lists".to_string())
+                .build(),
+        )
+        .await;
+
+    match result {
+        Err(LabkeyError::Api { status, .. }) => {
+            assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
+        }
+        other => panic!("expected LabkeyError::Api, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn get_schemas_non_json_error_maps_to_unexpected_response() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/MyProject/MyFolder/query-getSchemas.api"))
+        .respond_with(ResponseTemplate::new(502).set_body_string("schema service unavailable"))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client
+        .get_schemas(GetSchemasOptions::builder().build())
+        .await;
+
+    match result {
+        Err(LabkeyError::UnexpectedResponse { status, text }) => {
+            assert_eq!(status, reqwest::StatusCode::BAD_GATEWAY);
+            assert_eq!(text, "schema service unavailable");
+        }
+        other => panic!("expected LabkeyError::UnexpectedResponse, got {other:?}"),
+    }
 }
 
 #[tokio::test]

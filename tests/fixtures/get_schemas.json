@@ -1,0 +1,12 @@
+{
+  "core": {
+    "description": "Core schema",
+    "hidden": false,
+    "name": "core"
+  },
+  "lists": {
+    "description": "Lists schema",
+    "hidden": false,
+    "name": "lists"
+  }
+}

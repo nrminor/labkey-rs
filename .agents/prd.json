@@ -137,8 +137,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented query listing and schema listing support in src/query.rs by adding GetQueriesOptions, GetSchemasOptions, QueryInfo, and GetQueriesResponse with non-exhaustive conventions and typed rustdocs. Added LabkeyClient::get_queries and LabkeyClient::get_schemas using query-getQueries.api and query-getSchemas.api, with exact get_queries parameter keys includeColumns/includeSystemQueries/includeTitle/includeUserQueries/includeViewDataUrl/queryDetailColumns and raw serde_json::Value return for get_schemas to preserve keyed server response shape. Added unit tests for get_queries nested queries deserialization, get_schemas fixture object deserialization, and query endpoint URL routing for both actions. Added tests/fixtures/get_schemas.json and allow-listed it in .gitignore. Expanded integration coverage for full-parameter get_queries request contracts, get_schemas keyed-object response handling, minimal get_queries request behavior, and endpoint-specific error mapping for get_queries/get_schemas. Solicited feedback from nick-isms/testing-guru/semver-nag, incorporated feedback-oriented improvements, and verified all quality gates with just check before and after feedback updates."
     },
     {
       "id": "US-008",

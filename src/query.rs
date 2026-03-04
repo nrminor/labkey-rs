@@ -584,6 +584,105 @@ pub struct GetQueryDetailsOptions {
     pub include_triggers: Option<bool>,
 }
 
+/// Options for [`LabkeyClient::get_queries`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct GetQueriesOptions {
+    /// The schema for which available queries should be listed.
+    pub schema_name: String,
+    /// Override the client's default container path for this request.
+    pub container_path: Option<String>,
+    /// Include column metadata for each query.
+    pub include_columns: Option<bool>,
+    /// Include `LabKey` system-defined queries.
+    pub include_system_queries: Option<bool>,
+    /// Include custom query titles.
+    pub include_title: Option<bool>,
+    /// Include user-defined queries.
+    pub include_user_queries: Option<bool>,
+    /// Include view-data URLs in each query record.
+    pub include_view_data_url: Option<bool>,
+    /// Include detailed query column metadata.
+    pub query_detail_columns: Option<bool>,
+}
+
+/// Options for [`LabkeyClient::get_schemas`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct GetSchemasOptions {
+    /// Optional API version string sent to the server.
+    pub api_version: Option<String>,
+    /// Override the client's default container path for this request.
+    pub container_path: Option<String>,
+    /// Include hidden schemas in the result.
+    pub include_hidden: Option<bool>,
+    /// Filter the response to one schema name.
+    pub schema_name: Option<String>,
+}
+
+/// Query metadata entry in [`GetQueriesResponse`].
+// This endpoint exposes several independent capability flags in one object;
+// preserving bool fields keeps parity with server payload semantics.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct QueryInfo {
+    /// Whether the query is editable.
+    #[serde(default)]
+    pub can_edit: bool,
+    /// Whether shared views are editable.
+    #[serde(default)]
+    pub can_edit_shared_views: bool,
+    /// Query columns in this listing response.
+    ///
+    /// This field is intentionally untyped because `LabKey` varies column
+    /// payload detail based on request flags (for example,
+    /// `queryDetailColumns`).
+    #[serde(default)]
+    pub columns: Vec<serde_json::Value>,
+    /// Query description.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Whether the query is hidden.
+    #[serde(default)]
+    pub hidden: bool,
+    /// Whether the query is inherited from a parent container.
+    #[serde(default)]
+    pub inherit: bool,
+    /// Whether inherited metadata is currently active.
+    #[serde(default)]
+    pub is_inherited: bool,
+    /// Whether metadata is overrideable.
+    #[serde(default)]
+    pub is_metadata_overrideable: bool,
+    /// Whether the query is user-defined.
+    #[serde(default)]
+    pub is_user_defined: bool,
+    /// Query name.
+    pub name: String,
+    /// Whether the query is a snapshot query.
+    #[serde(default)]
+    pub snapshot: bool,
+    /// Query title.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// URL for viewing query data.
+    #[serde(default)]
+    pub view_data_url: Option<String>,
+}
+
+/// Response from [`LabkeyClient::get_queries`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct GetQueriesResponse {
+    /// Query list returned for the schema.
+    pub queries: Vec<QueryInfo>,
+    /// Schema name included in the response.
+    pub schema_name: String,
+}
+
 /// Lookup metadata attached to a query column.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1229,6 +1328,114 @@ impl LabkeyClient {
                     .map(|view_name| ("viewName".into(), view_name)),
             );
         }
+
+        self.get(url, &params).await
+    }
+
+    /// List available queries for a schema.
+    ///
+    /// Sends a GET request to `query-getQueries.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the HTTP request fails, the server returns
+    /// an error response, or the response body cannot be deserialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::query::GetQueriesOptions;
+    ///
+    /// let response = client
+    ///     .get_queries(
+    ///         GetQueriesOptions::builder()
+    ///             .schema_name("lists".to_string())
+    ///             .include_columns(true)
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("Found {} queries", response.queries.len());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_queries(
+        &self,
+        options: GetQueriesOptions,
+    ) -> Result<GetQueriesResponse, LabkeyError> {
+        let url = self.build_url("query", "getQueries.api", options.container_path.as_deref());
+        let params: Vec<(String, String)> = [
+            Some(("schemaName".into(), options.schema_name)),
+            opt("includeColumns", options.include_columns),
+            opt("includeSystemQueries", options.include_system_queries),
+            opt("includeTitle", options.include_title),
+            opt("includeUserQueries", options.include_user_queries),
+            opt("includeViewDataUrl", options.include_view_data_url),
+            opt("queryDetailColumns", options.query_detail_columns),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        self.get(url, &params).await
+    }
+
+    /// List schemas available in a container.
+    ///
+    /// Sends a GET request to `query-getSchemas.api`.
+    ///
+    /// Returns the raw JSON object keyed by schema name to preserve wire-level
+    /// compatibility with server variations.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the HTTP request fails, the server returns
+    /// an error response, or the response body cannot be deserialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::query::GetSchemasOptions;
+    ///
+    /// let response = client
+    ///     .get_schemas(
+    ///         GetSchemasOptions::builder()
+    ///             .include_hidden(false)
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("Schema keys returned: {}", response.as_object().map_or(0, |v| v.len()));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_schemas(
+        &self,
+        options: GetSchemasOptions,
+    ) -> Result<serde_json::Value, LabkeyError> {
+        let url = self.build_url("query", "getSchemas.api", options.container_path.as_deref());
+        let params: Vec<(String, String)> = [
+            opt("apiVersion", options.api_version),
+            opt("schemaName", options.schema_name),
+            opt("includeHidden", options.include_hidden),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
 
         self.get(url, &params).await
     }
@@ -1964,7 +2171,51 @@ mod tests {
     }
 
     #[test]
-    fn mutation_endpoint_urls_match_expected_actions() {
+    fn get_queries_response_deserializes_with_nested_queries() {
+        let json = serde_json::json!({
+            "schemaName": "lists",
+            "queries": [
+                {
+                    "name": "People",
+                    "title": "People List",
+                    "columns": [{"name": "RowId", "caption": "Row Id"}],
+                    "canEdit": true,
+                    "canEditSharedViews": false,
+                    "hidden": false,
+                    "inherit": true,
+                    "isInherited": false,
+                    "isMetadataOverrideable": true,
+                    "isUserDefined": true,
+                    "snapshot": false,
+                    "viewDataUrl": "/list-grid.view?name=People"
+                }
+            ]
+        });
+
+        let response: GetQueriesResponse =
+            serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(response.schema_name, "lists");
+        assert_eq!(response.queries.len(), 1);
+        assert_eq!(response.queries[0].name, "People");
+        assert_eq!(response.queries[0].columns.len(), 1);
+        assert_eq!(response.queries[0].title.as_deref(), Some("People List"));
+    }
+
+    #[test]
+    fn get_schemas_fixture_deserializes_to_keyed_object() {
+        let fixture = include_str!("../tests/fixtures/get_schemas.json");
+        let value: serde_json::Value =
+            serde_json::from_str(fixture).expect("fixture should deserialize");
+
+        let schemas = value
+            .as_object()
+            .expect("getSchemas payload should be object keyed by schema name");
+        assert!(schemas.contains_key("core"));
+        assert!(schemas.contains_key("lists"));
+    }
+
+    #[test]
+    fn query_endpoint_urls_match_expected_actions() {
         let client = test_client("https://labkey.example.com/labkey", "/MyProject/MyFolder");
 
         assert_eq!(
@@ -1978,6 +2229,18 @@ mod tests {
                 .build_url("query", "getQueryDetails.api", Some("/Alt/Container"))
                 .as_str(),
             "https://labkey.example.com/labkey/Alt/Container/query-getQueryDetails.api"
+        );
+        assert_eq!(
+            client
+                .build_url("query", "getQueries.api", Some("/Alt/Container"))
+                .as_str(),
+            "https://labkey.example.com/labkey/Alt/Container/query-getQueries.api"
+        );
+        assert_eq!(
+            client
+                .build_url("query", "getSchemas.api", Some("/Alt/Container"))
+                .as_str(),
+            "https://labkey.example.com/labkey/Alt/Container/query-getSchemas.api"
         );
 
         assert_eq!(
