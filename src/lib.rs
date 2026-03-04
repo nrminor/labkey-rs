@@ -12,17 +12,19 @@
 //! ```no_run
 //! use labkey_rs::{ClientConfig, Credential, LabkeyClient};
 //!
-//! let client = LabkeyClient::new(ClientConfig {
-//!     base_url: "https://labkey.example.com/labkey".into(),
-//!     credential: Credential::Basic {
+//! let config = ClientConfig::new(
+//!     "https://labkey.example.com/labkey",
+//!     Credential::Basic {
 //!         email: "user@example.com".into(),
 //!         password: "secret".into(),
 //!     },
-//!     container_path: "/MyProject/MyFolder".into(),
-//! }).expect("valid configuration");
+//!     "/MyProject/MyFolder",
+//! );
+//! let client = LabkeyClient::new(config).expect("valid configuration");
 //! ```
 
 pub mod client;
+pub mod common;
 pub mod error;
 pub mod filter;
 pub mod query;

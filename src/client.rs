@@ -34,12 +34,14 @@ pub enum Credential {
 /// ```no_run
 /// use labkey_rs::{ClientConfig, Credential, LabkeyClient};
 ///
-/// let client = LabkeyClient::new(ClientConfig {
-///     base_url: "https://labkey.example.com/labkey".into(),
-///     credential: Credential::ApiKey("my-api-key".into()),
-///     container_path: "/MyProject/MyFolder".into(),
-/// }).expect("valid configuration");
+/// let config = ClientConfig::new(
+///     "https://labkey.example.com/labkey",
+///     Credential::ApiKey("my-api-key".into()),
+///     "/MyProject/MyFolder",
+/// );
+/// let client = LabkeyClient::new(config).expect("valid configuration");
 /// ```
+#[non_exhaustive]
 pub struct ClientConfig {
     /// The base URL of the `LabKey` server (e.g., `"https://labkey.example.com/labkey"`).
     pub base_url: String,
@@ -48,6 +50,22 @@ pub struct ClientConfig {
     /// Default container path (e.g., `"/MyProject/MyFolder"`).
     /// Individual requests can override this.
     pub container_path: String,
+}
+
+impl ClientConfig {
+    /// Create a new client configuration.
+    #[must_use]
+    pub fn new(
+        base_url: impl Into<String>,
+        credential: Credential,
+        container_path: impl Into<String>,
+    ) -> Self {
+        Self {
+            base_url: base_url.into(),
+            credential,
+            container_path: container_path.into(),
+        }
+    }
 }
 
 /// Percent-encode each segment of a container path individually.
@@ -291,5 +309,14 @@ mod tests {
             container_path: "/".into(),
         });
         assert!(matches!(result, Err(crate::error::LabkeyError::Url(_))));
+    }
+
+    #[test]
+    fn client_config_struct_literal_still_constructs_in_crate() {
+        let _ = ClientConfig {
+            base_url: "https://labkey.example.com/labkey".into(),
+            credential: Credential::ApiKey("test-key".into()),
+            container_path: "/Project".into(),
+        };
     }
 }

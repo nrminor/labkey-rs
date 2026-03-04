@@ -2,3 +2,4 @@
 # Each agent session appends notes here for continuity across context windows.
 # ============================================================================
 
+2026-03-04: Completed US-001 (Semver guardrails and common audit type). Added #[non_exhaustive] to ClientConfig, FilterType, and ContainerFilter; added LabkeyError::InvalidInput(String); created src/common.rs with non-exhaustive AuditBehavior and serde wire values NONE/SUMMARY/DETAILED plus regression tests. Added ClientConfig::new and updated rustdoc examples to avoid external struct-literal construction breakage after non-exhaustive. Updated src/lib.rs exports, .gitignore allow-list for src/common.rs, marked US-001 passes=true with detailed notes in .agents/prd.json, and verified with just check before and after review feedback.

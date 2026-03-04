@@ -26,6 +26,7 @@
 !/src/lib.rs
 !/src/error.rs
 !/src/client.rs
+!/src/common.rs
 !/src/filter.rs
 !/src/query.rs
 

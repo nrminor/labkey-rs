@@ -14,6 +14,7 @@
 /// For example, [`FilterType::Equal`] has suffix `"eq"`, so a filter on
 /// column `"Age"` with value `"25"` would be encoded as `query.Age~eq=25`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum FilterType {
     // Comparison operators
     Equal,
@@ -393,6 +394,7 @@ pub fn encode_filters(filters: &[Filter], data_region_name: &str) -> Vec<(String
 /// data types support cross-container queries; in those cases all values
 /// behave the same as [`Current`](ContainerFilter::Current).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub enum ContainerFilter {
     /// Include all folders for which the user has read permission.
     AllFolders,

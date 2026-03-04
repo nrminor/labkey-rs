@@ -20,8 +20,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented semver guardrails and shared audit vocabulary. Marked ClientConfig, FilterType, and ContainerFilter as #[non_exhaustive], added LabkeyError::InvalidInput(String) for client-side validation failures, and introduced src/common.rs with non-exhaustive AuditBehavior plus serde wire mappings for NONE/SUMMARY/DETAILED. Added targeted tests for AuditBehavior round-trips and variant-count regression and an explicit in-crate ClientConfig construction test after the non-exhaustive change. Added ClientConfig::new and updated rustdoc examples to keep external construction ergonomic. Exported common as a module without root re-export of AuditBehavior, allow-listed src/common.rs in .gitignore, and verified all gates with just check." 
     },
     {
       "id": "US-002",

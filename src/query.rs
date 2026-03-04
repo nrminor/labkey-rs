@@ -321,11 +321,12 @@ impl LabkeyClient {
     ///
     /// ```no_run
     /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
-    /// # let client = labkey_rs::LabkeyClient::new(labkey_rs::ClientConfig {
-    /// #     base_url: "https://labkey.example.com/labkey".into(),
-    /// #     credential: labkey_rs::Credential::ApiKey("key".into()),
-    /// #     container_path: "/".into(),
-    /// # })?;
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
     /// use labkey_rs::query::SelectRowsOptions;
     ///
     /// let response = client.select_rows(
@@ -407,11 +408,12 @@ impl LabkeyClient {
     ///
     /// ```no_run
     /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
-    /// # let client = labkey_rs::LabkeyClient::new(labkey_rs::ClientConfig {
-    /// #     base_url: "https://labkey.example.com/labkey".into(),
-    /// #     credential: labkey_rs::Credential::ApiKey("key".into()),
-    /// #     container_path: "/".into(),
-    /// # })?;
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
     /// use labkey_rs::query::ExecuteSqlOptions;
     ///
     /// let response = client.execute_sql(

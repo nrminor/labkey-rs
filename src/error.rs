@@ -61,6 +61,10 @@ pub enum LabkeyError {
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
 
+    /// Invalid client-side input detected before making a request.
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
+
     /// The server returned a non-success status code with a structured error body.
     #[error("LabKey API error (HTTP {status}): {body}")]
     Api {
