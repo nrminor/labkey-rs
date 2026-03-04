@@ -624,6 +624,137 @@ pub struct GetSchemasOptions {
     pub schema_name: Option<String>,
 }
 
+/// Source type for [`GetDataSource`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum GetDataSourceType {
+    /// Read rows from a schema/query source.
+    Query,
+    /// Read rows from a SQL source.
+    Sql,
+}
+
+/// Source configuration for [`LabkeyClient::get_data`].
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum GetDataSource {
+    /// Query-backed getData source.
+    Query {
+        /// Schema containing the query.
+        schema_name: String,
+        /// Query name to execute.
+        query_name: String,
+    },
+    /// SQL-backed getData source.
+    Sql {
+        /// Schema used as SQL execution context.
+        schema_name: String,
+        /// SQL text to execute.
+        sql: String,
+    },
+}
+
+impl GetDataSource {
+    /// Return the source discriminator for this value.
+    #[must_use]
+    pub fn source_type(&self) -> GetDataSourceType {
+        match self {
+            Self::Query { .. } => GetDataSourceType::Query,
+            Self::Sql { .. } => GetDataSourceType::Sql,
+        }
+    }
+}
+
+/// Sort direction for [`GetDataSort`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum GetDataSortDirection {
+    /// Ascending sort.
+    Asc,
+    /// Descending sort.
+    Desc,
+}
+
+/// Sort descriptor for [`LabkeyClient::get_data`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct GetDataSort {
+    /// Field key parts of the column to sort.
+    pub field_key: Vec<String>,
+    /// Sort direction. Defaults to server behavior when omitted.
+    pub dir: Option<GetDataSortDirection>,
+}
+
+/// Filter descriptor for [`GetDataTransform`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct GetDataFilter {
+    /// Field key parts targeted by the filter.
+    pub field_key: Vec<String>,
+    /// Filter type URL suffix.
+    pub type_: String,
+    /// Optional filter value payload.
+    pub value: Option<serde_json::Value>,
+}
+
+/// Aggregate descriptor for [`GetDataTransform`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct GetDataAggregate {
+    /// Field key parts targeted by the aggregate.
+    pub field_key: Vec<String>,
+    /// Aggregate type.
+    pub type_: String,
+}
+
+/// Transform descriptor for [`LabkeyClient::get_data`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct GetDataTransform {
+    /// Transform type (for example, `aggregate`).
+    pub type_: Option<String>,
+    /// Group-by field keys.
+    pub group_by: Option<Vec<Vec<String>>>,
+    /// Transform-level filters.
+    pub filters: Option<Vec<GetDataFilter>>,
+    /// Transform-level aggregates.
+    pub aggregates: Option<Vec<GetDataAggregate>>,
+}
+
+/// Pivot descriptor for [`LabkeyClient::get_data`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct GetDataPivot {
+    /// Field key parts used as the pivot axis.
+    pub by: Vec<String>,
+    /// Field keys to pivot.
+    pub columns: Vec<Vec<String>>,
+}
+
+/// Options for [`LabkeyClient::get_data`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct GetDataOptions {
+    /// Source configuration for query/sql mode.
+    pub source: GetDataSource,
+    /// Override the client's default container path for this request.
+    pub container_path: Option<String>,
+    /// Renderer column field keys.
+    pub columns: Option<Vec<Vec<String>>>,
+    /// Include details-link pseudo column when supported.
+    pub include_details_column: Option<bool>,
+    /// Maximum number of rows to return.
+    pub max_rows: Option<i32>,
+    /// Row offset used for paging.
+    pub offset: Option<i64>,
+    /// Sort descriptors.
+    pub sort: Option<Vec<GetDataSort>>,
+    /// Optional transforms applied server-side.
+    pub transforms: Option<Vec<GetDataTransform>>,
+    /// Optional pivot configuration.
+    pub pivot: Option<GetDataPivot>,
+}
+
 /// Data view categories supported by [`LabkeyClient::get_data_views`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -1285,6 +1416,92 @@ struct ExecuteSqlBody {
     include_style: Option<bool>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GetDataBody {
+    source: GetDataBodySource,
+    renderer: GetDataRenderer,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    transforms: Option<Vec<GetDataBodyTransform>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pivot: Option<GetDataBodyPivot>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GetDataBodySource {
+    #[serde(rename = "type")]
+    type_: String,
+    schema_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    query_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sql: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GetDataRenderer {
+    #[serde(rename = "type")]
+    type_: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    columns: Option<Vec<Vec<String>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    include_details_column: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_rows: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    offset: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sort: Option<Vec<GetDataBodySort>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GetDataBodySort {
+    field_key: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dir: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GetDataBodyTransform {
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    type_: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    group_by: Option<Vec<Vec<String>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    filters: Option<Vec<GetDataBodyFilter>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    aggregates: Option<Vec<GetDataBodyAggregate>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GetDataBodyFilter {
+    field_key: Vec<String>,
+    #[serde(rename = "type")]
+    type_: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value: Option<serde_json::Value>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GetDataBodyAggregate {
+    field_key: Vec<String>,
+    #[serde(rename = "type")]
+    type_: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GetDataBodyPivot {
+    by: Vec<String>,
+    columns: Vec<Vec<String>>,
+}
+
 /// Request body for the `browseData.api` endpoint.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1422,6 +1639,88 @@ impl LabkeyClient {
     ) -> Result<ModifyRowsResults, LabkeyError> {
         let url = self.build_url("query", action, container_path.as_deref());
         self.post(url, body).await
+    }
+
+    fn build_get_data_source(source: GetDataSource) -> Result<GetDataBodySource, LabkeyError> {
+        match source {
+            GetDataSource::Query {
+                schema_name,
+                query_name,
+            } => {
+                if query_name.trim().is_empty() {
+                    return Err(LabkeyError::InvalidInput(
+                        "get_data source.type=query requires non-empty query_name".to_string(),
+                    ));
+                }
+                Ok(GetDataBodySource {
+                    type_: "query".to_string(),
+                    schema_name,
+                    query_name: Some(query_name),
+                    sql: None,
+                })
+            }
+            GetDataSource::Sql { schema_name, sql } => {
+                if sql.trim().is_empty() {
+                    return Err(LabkeyError::InvalidInput(
+                        "get_data source.type=sql requires non-empty sql".to_string(),
+                    ));
+                }
+                Ok(GetDataBodySource {
+                    type_: "sql".to_string(),
+                    schema_name,
+                    query_name: None,
+                    sql: Some(waf_encode(&sql)),
+                })
+            }
+        }
+    }
+
+    fn map_get_data_sorts(sorts: Option<Vec<GetDataSort>>) -> Option<Vec<GetDataBodySort>> {
+        sorts.map(|items| {
+            items
+                .into_iter()
+                .map(|sort| GetDataBodySort {
+                    field_key: sort.field_key,
+                    dir: sort.dir.map(|d| match d {
+                        GetDataSortDirection::Asc => "ASC".to_string(),
+                        GetDataSortDirection::Desc => "DESC".to_string(),
+                    }),
+                })
+                .collect()
+        })
+    }
+
+    fn map_get_data_transforms(
+        transforms: Option<Vec<GetDataTransform>>,
+    ) -> Option<Vec<GetDataBodyTransform>> {
+        transforms.map(|items| {
+            items
+                .into_iter()
+                .map(|transform| GetDataBodyTransform {
+                    type_: transform.type_,
+                    group_by: transform.group_by,
+                    filters: transform.filters.map(|filters| {
+                        filters
+                            .into_iter()
+                            .map(|filter| GetDataBodyFilter {
+                                field_key: filter.field_key,
+                                type_: filter.type_,
+                                value: filter.value,
+                            })
+                            .collect()
+                    }),
+                    aggregates: transform.aggregates.map(|aggregates| {
+                        aggregates
+                            .into_iter()
+                            .map(|aggregate| GetDataBodyAggregate {
+                                field_key: aggregate.field_key,
+                                type_: aggregate.type_,
+                            })
+                            .collect()
+                    }),
+                })
+                .collect()
+        })
     }
 
     /// Select rows from a `LabKey` query.
@@ -2613,6 +2912,72 @@ impl LabkeyClient {
             .await
     }
 
+    /// Execute a typed `getData` request and return JSON-rendered rows.
+    ///
+    /// Sends a POST request to `query-getData` (no `.api` suffix) and always
+    /// sets `renderer.type` to `"json"`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the request fails, the server returns an
+    /// error response, the response body cannot be deserialized, or required
+    /// source fields are missing for the selected source type.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::query::{GetDataOptions, GetDataSource};
+    ///
+    /// let response = client
+    ///     .get_data(
+    ///         GetDataOptions::builder()
+    ///             .source(GetDataSource::Query {
+    ///                 schema_name: "lists".to_string(),
+    ///                 query_name: "People".to_string(),
+    ///             })
+    ///             .max_rows(250)
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("getData row count: {}", response.row_count);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_data(
+        &self,
+        options: GetDataOptions,
+    ) -> Result<SelectRowsResponse, LabkeyError> {
+        let body_source = Self::build_get_data_source(options.source)?;
+
+        let body = GetDataBody {
+            source: body_source,
+            renderer: GetDataRenderer {
+                type_: "json",
+                columns: options.columns,
+                include_details_column: options.include_details_column,
+                max_rows: options.max_rows,
+                offset: options.offset,
+                sort: Self::map_get_data_sorts(options.sort),
+            },
+            transforms: Self::map_get_data_transforms(options.transforms),
+            pivot: options.pivot.map(|pivot| GetDataBodyPivot {
+                by: pivot.by,
+                columns: pivot.columns,
+            }),
+        };
+
+        let url = self.build_url("query", "getData", options.container_path.as_deref());
+        self.post(url, &body).await
+    }
+
     /// Execute arbitrary `LabKey` SQL.
     ///
     /// Sends a POST request to the `query-executeSql.api` endpoint with the
@@ -3178,6 +3543,12 @@ mod tests {
                 .as_str(),
             "https://labkey.example.com/labkey/query-getServerDate.api"
         );
+        assert_eq!(
+            client
+                .build_url("query", "getData", Some("/Alt/Container"))
+                .as_str(),
+            "https://labkey.example.com/labkey/Alt/Container/query-getData"
+        );
     }
 
     #[test]
@@ -3330,6 +3701,22 @@ mod tests {
     }
 
     #[test]
+    fn get_data_source_type_variant_count_regression() {
+        let count = match GetDataSourceType::Query {
+            GetDataSourceType::Query | GetDataSourceType::Sql => 2,
+        };
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn get_data_sort_direction_variant_count_regression() {
+        let count = match GetDataSortDirection::Asc {
+            GetDataSortDirection::Asc | GetDataSortDirection::Desc => 2,
+        };
+        assert_eq!(count, 2);
+    }
+
+    #[test]
     fn import_data_response_deserializes_with_job_id() {
         let json = serde_json::json!({
             "success": true,
@@ -3417,6 +3804,199 @@ mod tests {
         assert_eq!(obj.get("includeData"), Some(&serde_json::json!(true)));
         assert_eq!(obj.get("includeMetadata"), Some(&serde_json::json!(false)));
         assert!(!obj.contains_key("dataTypes"));
+    }
+
+    #[test]
+    fn get_data_body_serializes_query_source_and_optional_sections() {
+        let body = GetDataBody {
+            source: GetDataBodySource {
+                type_: "query".to_string(),
+                schema_name: "lists".to_string(),
+                query_name: Some("People".to_string()),
+                sql: None,
+            },
+            renderer: GetDataRenderer {
+                type_: "json",
+                columns: Some(vec![vec!["Name".to_string()]]),
+                include_details_column: Some(true),
+                max_rows: Some(10),
+                offset: Some(5),
+                sort: Some(vec![GetDataBodySort {
+                    field_key: vec!["Name".to_string()],
+                    dir: Some("ASC".to_string()),
+                }]),
+            },
+            transforms: Some(vec![GetDataBodyTransform {
+                type_: Some("aggregate".to_string()),
+                group_by: Some(vec![vec!["Department".to_string()]]),
+                filters: Some(vec![GetDataBodyFilter {
+                    field_key: vec!["Status".to_string()],
+                    type_: "eq".to_string(),
+                    value: Some(serde_json::json!("Active")),
+                }]),
+                aggregates: Some(vec![GetDataBodyAggregate {
+                    field_key: vec!["Amount".to_string()],
+                    type_: "sum".to_string(),
+                }]),
+            }]),
+            pivot: Some(GetDataBodyPivot {
+                by: vec!["Department".to_string()],
+                columns: vec![vec!["Amount".to_string()]],
+            }),
+        };
+
+        let value = serde_json::to_value(body).expect("should serialize get_data body");
+        let obj = value.as_object().expect("body should be object");
+
+        assert_eq!(obj["source"]["type"], serde_json::json!("query"));
+        assert_eq!(obj["source"]["schemaName"], serde_json::json!("lists"));
+        assert_eq!(obj["source"]["queryName"], serde_json::json!("People"));
+        assert!(obj["source"].get("sql").is_none());
+        assert_eq!(obj["renderer"]["type"], serde_json::json!("json"));
+        assert_eq!(obj["renderer"]["columns"], serde_json::json!([["Name"]]));
+        assert_eq!(
+            obj["renderer"]["includeDetailsColumn"],
+            serde_json::json!(true)
+        );
+        assert_eq!(obj["renderer"]["maxRows"], serde_json::json!(10));
+        assert_eq!(obj["renderer"]["offset"], serde_json::json!(5));
+        assert_eq!(
+            obj["renderer"]["sort"][0]["fieldKey"],
+            serde_json::json!(["Name"])
+        );
+        assert_eq!(obj["renderer"]["sort"][0]["dir"], serde_json::json!("ASC"));
+        assert_eq!(obj["transforms"][0]["type"], serde_json::json!("aggregate"));
+        assert_eq!(
+            obj["transforms"][0]["filters"][0]["fieldKey"],
+            serde_json::json!(["Status"])
+        );
+        assert_eq!(
+            obj["transforms"][0]["filters"][0]["type"],
+            serde_json::json!("eq")
+        );
+        assert_eq!(
+            obj["transforms"][0]["aggregates"][0]["fieldKey"],
+            serde_json::json!(["Amount"])
+        );
+        assert_eq!(
+            obj["transforms"][0]["aggregates"][0]["type"],
+            serde_json::json!("sum")
+        );
+        assert_eq!(obj["pivot"]["by"], serde_json::json!(["Department"]));
+        assert_eq!(obj["pivot"]["columns"], serde_json::json!([["Amount"]]));
+    }
+
+    #[test]
+    fn get_data_body_omits_absent_optional_fields() {
+        let body = GetDataBody {
+            source: GetDataBodySource {
+                type_: "sql".to_string(),
+                schema_name: "core".to_string(),
+                query_name: None,
+                sql: Some(waf_encode("SELECT * FROM core.Users")),
+            },
+            renderer: GetDataRenderer {
+                type_: "json",
+                columns: None,
+                include_details_column: None,
+                max_rows: None,
+                offset: None,
+                sort: None,
+            },
+            transforms: None,
+            pivot: None,
+        };
+
+        let value = serde_json::to_value(body).expect("should serialize get_data body");
+        let obj = value.as_object().expect("body should be object");
+        let source = obj
+            .get("source")
+            .and_then(serde_json::Value::as_object)
+            .expect("source should be object");
+        let renderer = obj
+            .get("renderer")
+            .and_then(serde_json::Value::as_object)
+            .expect("renderer should be object");
+
+        assert_eq!(source.get("type"), Some(&serde_json::json!("sql")));
+        assert_eq!(source.get("schemaName"), Some(&serde_json::json!("core")));
+        assert!(source.get("queryName").is_none());
+        assert!(source.get("sql").is_some());
+        assert_eq!(renderer.get("type"), Some(&serde_json::json!("json")));
+        assert!(!renderer.contains_key("columns"));
+        assert!(!renderer.contains_key("includeDetailsColumn"));
+        assert!(!renderer.contains_key("maxRows"));
+        assert!(!renderer.contains_key("offset"));
+        assert!(!renderer.contains_key("sort"));
+        assert!(!obj.contains_key("transforms"));
+        assert!(!obj.contains_key("pivot"));
+    }
+
+    #[test]
+    fn get_data_source_reports_expected_source_type() {
+        assert_eq!(
+            GetDataSource::Query {
+                schema_name: "lists".to_string(),
+                query_name: "People".to_string(),
+            }
+            .source_type(),
+            GetDataSourceType::Query
+        );
+        assert_eq!(
+            GetDataSource::Sql {
+                schema_name: "core".to_string(),
+                sql: "SELECT * FROM core.Users".to_string(),
+            }
+            .source_type(),
+            GetDataSourceType::Sql
+        );
+    }
+
+    #[tokio::test]
+    async fn get_data_query_source_with_empty_query_name_returns_invalid_input() {
+        let client = test_client("https://labkey.example.com/labkey", "/MyProject/MyFolder");
+        let result = client
+            .get_data(
+                GetDataOptions::builder()
+                    .source(GetDataSource::Query {
+                        schema_name: "lists".to_string(),
+                        query_name: "   ".to_string(),
+                    })
+                    .build(),
+            )
+            .await;
+
+        match result {
+            Err(LabkeyError::InvalidInput(message)) => {
+                assert_eq!(
+                    message,
+                    "get_data source.type=query requires non-empty query_name"
+                );
+            }
+            other => panic!("expected LabkeyError::InvalidInput, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn get_data_sql_source_with_empty_sql_returns_invalid_input() {
+        let client = test_client("https://labkey.example.com/labkey", "/MyProject/MyFolder");
+        let result = client
+            .get_data(
+                GetDataOptions::builder()
+                    .source(GetDataSource::Sql {
+                        schema_name: "core".to_string(),
+                        sql: "  ".to_string(),
+                    })
+                    .build(),
+            )
+            .await;
+
+        match result {
+            Err(LabkeyError::InvalidInput(message)) => {
+                assert_eq!(message, "get_data source.type=sql requires non-empty sql");
+            }
+            other => panic!("expected LabkeyError::InvalidInput, got {other:?}"),
+        }
     }
 
     #[test]

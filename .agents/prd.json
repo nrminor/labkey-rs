@@ -211,8 +211,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented typed query get_data support in src/query.rs with new public get-data vocabulary: GetDataOptions, GetDataSource, GetDataSourceType, GetDataSortDirection, GetDataSort, GetDataTransform, GetDataFilter, GetDataAggregate, and GetDataPivot. Added LabkeyClient::get_data targeting query-getData (no .api suffix) and returning SelectRowsResponse. Request shaping now uses private typed JSON structs with renderer.type fixed to \"json\", typed source encoding for Query vs Sql modes, SQL WAF encoding via existing helper, uppercase ASC/DESC wire mapping through GetDataSortDirection, and omission of optional renderer/transforms/pivot keys when unset. Added client-side validation for empty query/sql source values with LabkeyError::InvalidInput. Expanded unit tests for source/sort variant-count regressions, source_type helper behavior, endpoint URL regression, get-data body serialization/omission contracts, and invalid-input edges. Expanded integration tests to assert exact query-getData request bodies for query and sql source modes, transforms+pivot payload shape, and endpoint-specific JSON/non-JSON error mapping. Solicited and addressed feedback from nick-isms/testing-guru/semver-nag, including source-model hardening and stricter contract tests, and verified all quality gates with just check before and after review-driven updates." 
     },
     {
       "id": "US-012",

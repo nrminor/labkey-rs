@@ -2,6 +2,7 @@ mod common;
 
 use std::time::Duration;
 
+use base64::Engine;
 use common::{LabkeyError, Mock, MockServer, ResponseTemplate, fixture, test_client};
 #[cfg(feature = "internal-test-support")]
 use labkey_rs::client::__internal_test_support;
@@ -9,17 +10,24 @@ use labkey_rs::common::AuditBehavior;
 use labkey_rs::filter::Filter;
 use labkey_rs::query::{
     CommandType, DataViewType, DeleteQueryViewOptions, DeleteRowsOptions, ExecuteSqlOptions,
-    GetDataViewsOptions, GetQueriesOptions, GetQueryDetailsOptions, GetQueryViewsOptions,
-    GetSchemasOptions, ImportDataOptions, ImportDataSource, InsertOption, InsertRowsOptions,
-    MoveRowsOptions, SaveQueryViewsOptions, SaveRowsCommand, SaveRowsOptions,
-    SaveSessionViewOptions, SelectDistinctOptions, SelectRowsOptions, TruncateTableOptions,
-    UpdateRowsOptions, ValidateQueryOptions,
+    GetDataAggregate, GetDataFilter, GetDataOptions, GetDataPivot, GetDataSort,
+    GetDataSortDirection, GetDataSource, GetDataTransform, GetDataViewsOptions, GetQueriesOptions,
+    GetQueryDetailsOptions, GetQueryViewsOptions, GetSchemasOptions, ImportDataOptions,
+    ImportDataSource, InsertOption, InsertRowsOptions, MoveRowsOptions, SaveQueryViewsOptions,
+    SaveRowsCommand, SaveRowsOptions, SaveSessionViewOptions, SelectDistinctOptions,
+    SelectRowsOptions, TruncateTableOptions, UpdateRowsOptions, ValidateQueryOptions,
 };
 use url::Url;
 use wiremock::matchers::{
     basic_auth, body_json, body_string_contains, header, header_exists, method, path, query_param,
     query_param_is_missing,
 };
+
+fn waf_encode_for_test(value: &str) -> String {
+    let url_encoded = urlencoding::encode(value);
+    let b64 = base64::engine::general_purpose::STANDARD.encode(url_encoded.as_bytes());
+    format!("/*{{{{base64/x-www-form-urlencoded/wafText}}}}*/{b64}")
+}
 
 #[tokio::test]
 async fn select_rows_sends_expected_get_request_shape() {
@@ -83,6 +91,206 @@ async fn execute_sql_sends_expected_post_request_shape() {
                 .schema_name("core".to_string())
                 .sql("SELECT DisplayName FROM core.users".to_string())
                 .sort("DisplayName".to_string())
+                .build(),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(response.row_count, 0);
+}
+
+#[tokio::test]
+async fn get_data_query_source_posts_expected_body_and_returns_rows() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/query-getData"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "source": {
+                "type": "query",
+                "schemaName": "lists",
+                "queryName": "People"
+            },
+            "renderer": {
+                "type": "json",
+                "columns": [["Name"]],
+                "includeDetailsColumn": true,
+                "maxRows": 25,
+                "offset": 5,
+                "sort": [{
+                    "fieldKey": ["Name"],
+                    "dir": "DESC"
+                }]
+            }
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "queryName": "People",
+            "rowCount": 1,
+            "rows": [{
+                "data": {
+                    "Name": { "value": "Alice" }
+                }
+            }]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .get_data(
+            GetDataOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .source(GetDataSource::Query {
+                    schema_name: "lists".to_string(),
+                    query_name: "People".to_string(),
+                })
+                .columns(vec![vec!["Name".to_string()]])
+                .include_details_column(true)
+                .max_rows(25)
+                .offset(5)
+                .sort(vec![
+                    GetDataSort::builder()
+                        .field_key(vec!["Name".to_string()])
+                        .dir(GetDataSortDirection::Desc)
+                        .build(),
+                ])
+                .build(),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(response.row_count, 1);
+    assert_eq!(
+        response.rows[0].data["Name"].value,
+        serde_json::json!("Alice")
+    );
+}
+
+#[tokio::test]
+async fn get_data_posts_transforms_and_pivot_shape() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/query-getData"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "source": {
+                "type": "query",
+                "schemaName": "lists",
+                "queryName": "People"
+            },
+            "renderer": {
+                "type": "json"
+            },
+            "transforms": [{
+                "type": "aggregate",
+                "groupBy": [["Department"]],
+                "filters": [{
+                    "fieldKey": ["Status"],
+                    "type": "eq",
+                    "value": "Active"
+                }],
+                "aggregates": [{
+                    "fieldKey": ["Amount"],
+                    "type": "sum"
+                }]
+            }],
+            "pivot": {
+                "by": ["Department"],
+                "columns": [["Amount"]]
+            }
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "queryName": "People",
+            "rowCount": 0,
+            "rows": []
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .get_data(
+            GetDataOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .source(GetDataSource::Query {
+                    schema_name: "lists".to_string(),
+                    query_name: "People".to_string(),
+                })
+                .transforms(vec![
+                    GetDataTransform::builder()
+                        .type_("aggregate".to_string())
+                        .group_by(vec![vec!["Department".to_string()]])
+                        .filters(vec![
+                            GetDataFilter::builder()
+                                .field_key(vec!["Status".to_string()])
+                                .type_("eq".to_string())
+                                .value(serde_json::json!("Active"))
+                                .build(),
+                        ])
+                        .aggregates(vec![
+                            GetDataAggregate::builder()
+                                .field_key(vec!["Amount".to_string()])
+                                .type_("sum".to_string())
+                                .build(),
+                        ])
+                        .build(),
+                ])
+                .pivot(
+                    GetDataPivot::builder()
+                        .by(vec!["Department".to_string()])
+                        .columns(vec![vec!["Amount".to_string()]])
+                        .build(),
+                )
+                .build(),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(response.row_count, 0);
+}
+
+#[tokio::test]
+async fn get_data_sql_source_waf_encodes_sql_and_omits_absent_optionals() {
+    let server = MockServer::start().await;
+    let sql = "SELECT DisplayName FROM core.users";
+    let expected_sql = waf_encode_for_test(sql);
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/query-getData"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "source": {
+                "type": "sql",
+                "schemaName": "core",
+                "sql": expected_sql
+            },
+            "renderer": {
+                "type": "json"
+            }
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "core",
+            "rowCount": 0,
+            "rows": []
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .get_data(
+            GetDataOptions::builder()
+                .source(GetDataSource::Sql {
+                    schema_name: "core".to_string(),
+                    sql: sql.to_string(),
+                })
                 .build(),
         )
         .await
@@ -849,6 +1057,68 @@ async fn get_server_date_uses_no_container_path_and_no_params() {
         .expect("get server date should succeed");
 
     assert_eq!(result.date, "2026-03-04T18:00:00.000Z");
+}
+
+#[tokio::test]
+async fn get_data_json_error_maps_to_api_error() {
+    let server = MockServer::start().await;
+    let error_body: serde_json::Value = fixture("api_error.json");
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/query-getData"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(error_body))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client
+        .get_data(
+            GetDataOptions::builder()
+                .source(GetDataSource::Query {
+                    schema_name: "lists".to_string(),
+                    query_name: "People".to_string(),
+                })
+                .build(),
+        )
+        .await;
+
+    match result {
+        Err(LabkeyError::Api { status, .. }) => {
+            assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
+        }
+        other => panic!("expected LabkeyError::Api, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn get_data_non_json_error_maps_to_unexpected_response() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/query-getData"))
+        .respond_with(ResponseTemplate::new(502).set_body_string("getData failed"))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client
+        .get_data(
+            GetDataOptions::builder()
+                .source(GetDataSource::Query {
+                    schema_name: "lists".to_string(),
+                    query_name: "People".to_string(),
+                })
+                .build(),
+        )
+        .await;
+
+    match result {
+        Err(LabkeyError::UnexpectedResponse { status, text }) => {
+            assert_eq!(status, reqwest::StatusCode::BAD_GATEWAY);
+            assert_eq!(text, "getData failed");
+        }
+        other => panic!("expected LabkeyError::UnexpectedResponse, got {other:?}"),
+    }
 }
 
 #[tokio::test]
