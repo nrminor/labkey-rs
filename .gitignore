@@ -24,6 +24,8 @@
 # === Allowed: Source code ===
 !/src
 !/src/lib.rs
+!/src/error.rs
+!/src/client.rs
 
 # === Allowed: GitHub workflows ===
 !/.github
