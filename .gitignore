@@ -27,6 +27,7 @@
 !/src/error.rs
 !/src/client.rs
 !/src/filter.rs
+!/src/query.rs
 
 # === Allowed: GitHub workflows ===
 !/.github

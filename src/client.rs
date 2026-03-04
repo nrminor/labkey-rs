@@ -66,9 +66,7 @@ fn encode_container_path(path: &str) -> String {
 /// Async client for the `LabKey` Server REST API.
 ///
 /// Construct one via [`LabkeyClient::new`], then call endpoint methods like
-/// `select_rows` or `execute_sql`.
-// TODO(cleanup): remove once endpoint methods are added and fields are read
-#[allow(dead_code)]
+/// [`select_rows`](Self::select_rows) or [`execute_sql`](Self::execute_sql).
 pub struct LabkeyClient {
     http: reqwest::Client,
     base_url: Url,
@@ -76,8 +74,6 @@ pub struct LabkeyClient {
     credential: Credential,
 }
 
-// TODO(cleanup): remove once endpoint methods call these
-#[allow(dead_code)]
 impl LabkeyClient {
     /// Create a new client from the given configuration.
     ///
