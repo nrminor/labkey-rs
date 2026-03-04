@@ -7,8 +7,8 @@ use common::{LabkeyError, Mock, MockServer, ResponseTemplate, fixture, test_clie
 use labkey_rs::client::__internal_test_support;
 use labkey_rs::common::AuditBehavior;
 use labkey_rs::query::{
-    DeleteRowsOptions, ExecuteSqlOptions, InsertRowsOptions, SelectRowsOptions,
-    TruncateTableOptions, UpdateRowsOptions,
+    CommandType, DeleteRowsOptions, ExecuteSqlOptions, InsertRowsOptions, MoveRowsOptions,
+    SaveRowsCommand, SaveRowsOptions, SelectRowsOptions, TruncateTableOptions, UpdateRowsOptions,
 };
 use url::Url;
 use wiremock::matchers::{
@@ -403,4 +403,145 @@ async fn truncate_table_sends_required_fields_without_rows() {
 
     assert_eq!(result.command, "truncate");
     assert_eq!(result.rows_affected, 0);
+}
+
+#[tokio::test]
+async fn move_rows_sends_expected_request_shape() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/query-moveRows.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "schemaName": "lists",
+            "queryName": "People",
+            "targetContainerPath": "/Target/Folder",
+            "rows": [{"RowId": 1}],
+            "auditBehavior": "SUMMARY"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "command": "update",
+            "errors": [],
+            "queryName": "People",
+            "rows": [{"RowId": 1}],
+            "rowsAffected": 1,
+            "schemaName": "lists",
+            "success": true,
+            "containerPath": "/Target/Folder",
+            "updateCounts": {"rows": 1}
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client
+        .move_rows(
+            MoveRowsOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .target_container_path("/Target/Folder".to_string())
+                .rows(vec![serde_json::json!({"RowId": 1})])
+                .container_path("/Alt/Container".to_string())
+                .audit_behavior(AuditBehavior::Summary)
+                .build(),
+        )
+        .await
+        .expect("move rows should succeed");
+
+    assert!(result.success);
+    assert_eq!(result.result.rows_affected, 1);
+}
+
+#[tokio::test]
+async fn save_rows_supports_empty_commands() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/query-saveRows.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "commands": [],
+            "containerPath": "/Alt/Container",
+            "validateOnly": true
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "committed": true,
+            "errorCount": 0,
+            "result": []
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client
+        .save_rows(
+            SaveRowsOptions::builder()
+                .commands(Vec::new())
+                .container_path("/Alt/Container".to_string())
+                .validate_only(true)
+                .build(),
+        )
+        .await
+        .expect("save rows should succeed");
+
+    assert!(result.committed);
+    assert_eq!(result.error_count, 0);
+    assert!(result.result.is_empty());
+}
+
+#[tokio::test]
+async fn save_rows_sends_command_wire_values() {
+    let server = MockServer::start().await;
+
+    let command = SaveRowsCommand::builder()
+        .command(CommandType::Delete)
+        .schema_name("lists".to_string())
+        .query_name("People".to_string())
+        .rows(vec![serde_json::json!({"RowId": 1})])
+        .build();
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/query-saveRows.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "commands": [{
+                "command": "delete",
+                "schemaName": "lists",
+                "queryName": "People",
+                "rows": [{"RowId": 1}]
+            }],
+            "containerPath": "/Alt/Container"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "committed": true,
+            "errorCount": 0,
+            "result": [{
+                "command": "delete",
+                "errors": [],
+                "queryName": "People",
+                "rows": [{"RowId": 1}],
+                "rowsAffected": 1,
+                "schemaName": "lists"
+            }]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client
+        .save_rows(
+            SaveRowsOptions::builder()
+                .commands(vec![command])
+                .container_path("/Alt/Container".to_string())
+                .build(),
+        )
+        .await
+        .expect("save rows should succeed");
+
+    assert!(result.committed);
+    assert_eq!(result.result.len(), 1);
+    assert_eq!(result.result[0].command, "delete");
 }

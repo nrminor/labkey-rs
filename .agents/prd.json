@@ -97,8 +97,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented move/save query mutation support in src/query.rs with new public types MoveRowsOptions, MoveRowsResponse, SaveRowsOptions, SaveRowsCommand, SaveRowsResponse, CommandType, and SaveRowsApiVersion following story conventions (bon builders for options, non-exhaustive response models, explicit command wire mappings). Added LabkeyClient::move_rows and LabkeyClient::save_rows using typed JSON bodies and correct controller actions query-moveRows.api and query-saveRows.api, including optional container override handling and strict omission of optional fields when unset. Added rustdocs with # Errors and no_run # Example sections for both endpoints. Expanded unit coverage for move/save endpoint URL routing, SaveRowsCommand serialization contract, CommandType exact wire value serialize/deserialize behavior plus unknown-value rejection and variant-count regression, MoveRowsResponse happy/minimal deserialization, and SaveRowsResponse empty-commands deserialization. Expanded integration coverage in tests/client_integration.rs for move_rows request body/auth/header/path behavior, save_rows empty commands edge behavior, and save_rows command wire serialization behavior. Solicited and addressed feedback from nick-isms/testing-guru/semver-nag and re-ran just check successfully before and after feedback changes."
     },
     {
       "id": "US-006",
