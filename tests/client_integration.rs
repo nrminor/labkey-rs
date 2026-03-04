@@ -8,9 +8,11 @@ use labkey_rs::client::__internal_test_support;
 use labkey_rs::common::AuditBehavior;
 use labkey_rs::filter::Filter;
 use labkey_rs::query::{
-    CommandType, DeleteRowsOptions, ExecuteSqlOptions, GetQueriesOptions, GetQueryDetailsOptions,
-    GetSchemasOptions, InsertRowsOptions, MoveRowsOptions, SaveRowsCommand, SaveRowsOptions,
-    SelectDistinctOptions, SelectRowsOptions, TruncateTableOptions, UpdateRowsOptions,
+    CommandType, DeleteQueryViewOptions, DeleteRowsOptions, ExecuteSqlOptions, GetQueriesOptions,
+    GetQueryDetailsOptions, GetQueryViewsOptions, GetSchemasOptions, InsertRowsOptions,
+    MoveRowsOptions, SaveQueryViewsOptions, SaveRowsCommand, SaveRowsOptions,
+    SaveSessionViewOptions, SelectDistinctOptions, SelectRowsOptions, TruncateTableOptions,
+    UpdateRowsOptions,
 };
 use url::Url;
 use wiremock::matchers::{
@@ -381,6 +383,264 @@ async fn get_queries_supports_minimal_required_options() {
 
     assert_eq!(response.schema_name, "lists");
     assert!(response.queries.is_empty());
+}
+
+#[tokio::test]
+async fn get_query_views_sends_expected_params() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/query-getQueryViews.api"))
+        .and(query_param("schemaName", "lists"))
+        .and(query_param("queryName", "People"))
+        .and(query_param("viewName", "All"))
+        .and(query_param("metadata", "{\"scope\":\"grid\"}"))
+        .and(query_param("excludeSessionView", "true"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "queryName": "People",
+            "views": [{"name": "All"}]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .get_query_views(
+            GetQueryViewsOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .view_name("All".to_string())
+                .metadata(serde_json::json!({"scope": "grid"}))
+                .exclude_session_view(true)
+                .build(),
+        )
+        .await
+        .expect("get query views should succeed");
+
+    assert_eq!(response["queryName"], serde_json::json!("People"));
+}
+
+#[tokio::test]
+async fn save_query_views_omits_false_boolean_flags() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/query-saveQueryViews.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "schemaName": "lists",
+            "queryName": "People",
+            "views": [{"name": "All"}],
+            "session": true
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "saved": true
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .save_query_views(
+            SaveQueryViewsOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .views(serde_json::json!([{"name": "All"}]))
+                .shared(false)
+                .session(true)
+                .hidden(false)
+                .build(),
+        )
+        .await
+        .expect("save query views should succeed");
+
+    assert_eq!(response["saved"], serde_json::json!(true));
+}
+
+#[tokio::test]
+async fn save_query_views_emits_true_flags_and_metadata() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/query-saveQueryViews.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "schemaName": "lists",
+            "queryName": "People",
+            "metadata": {"scope": "grid"},
+            "views": [{"name": "All"}],
+            "shared": true,
+            "hidden": true
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "saved": true
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .save_query_views(
+            SaveQueryViewsOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .metadata(serde_json::json!({"scope": "grid"}))
+                .views(serde_json::json!([{"name": "All"}]))
+                .shared(true)
+                .session(false)
+                .hidden(true)
+                .build(),
+        )
+        .await
+        .expect("save query views should succeed");
+
+    assert_eq!(response["saved"], serde_json::json!(true));
+}
+
+#[tokio::test]
+async fn save_session_view_uses_flat_query_dot_keys() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/query-saveSessionView.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "schemaName": "lists",
+            "query.queryName": "People",
+            "query.viewName": "Session View",
+            "newName": "Saved View",
+            "shared": true
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "saved": true
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .save_session_view(
+            SaveSessionViewOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .view_name("Session View".to_string())
+                .new_name("Saved View".to_string())
+                .shared(true)
+                .replace(false)
+                .build(),
+        )
+        .await
+        .expect("save session view should succeed");
+
+    assert_eq!(response["saved"], serde_json::json!(true));
+}
+
+#[tokio::test]
+async fn delete_query_view_complete_semantics_follow_revert() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/query-deleteView.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "schemaName": "lists",
+            "queryName": "People",
+            "viewName": "Saved View"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "deleted": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/query-deleteView.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "schemaName": "lists",
+            "queryName": "People",
+            "viewName": "Saved View",
+            "complete": false
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "deleted": false
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/query-deleteView.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "schemaName": "lists",
+            "queryName": "People",
+            "viewName": "Saved View",
+            "complete": true
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "deleted": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+
+    let response_none = client
+        .delete_query_view(
+            DeleteQueryViewOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .container_path("/Alt/Container".to_string())
+                .view_name("Saved View".to_string())
+                .build(),
+        )
+        .await
+        .expect("delete query view with unset revert should succeed");
+    assert_eq!(response_none["deleted"], serde_json::json!(true));
+
+    let response_revert = client
+        .delete_query_view(
+            DeleteQueryViewOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .container_path("/Alt/Container".to_string())
+                .view_name("Saved View".to_string())
+                .revert(true)
+                .build(),
+        )
+        .await
+        .expect("delete query view revert should succeed");
+    assert_eq!(response_revert["deleted"], serde_json::json!(false));
+
+    let response_complete = client
+        .delete_query_view(
+            DeleteQueryViewOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .container_path("/Alt/Container".to_string())
+                .view_name("Saved View".to_string())
+                .revert(false)
+                .build(),
+        )
+        .await
+        .expect("delete query view complete should succeed");
+    assert_eq!(response_complete["deleted"], serde_json::json!(true));
 }
 
 #[tokio::test]

@@ -620,6 +620,86 @@ pub struct GetSchemasOptions {
     pub schema_name: Option<String>,
 }
 
+/// Options for [`LabkeyClient::get_query_views`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct GetQueryViewsOptions {
+    /// Override the client's default container path for this request.
+    pub container_path: Option<String>,
+    /// Exclude the current session-scoped view when listing views.
+    pub exclude_session_view: Option<bool>,
+    /// Optional metadata payload echoed by the server.
+    pub metadata: Option<serde_json::Value>,
+    /// Query name to fetch views for.
+    pub query_name: Option<String>,
+    /// Schema name containing the query.
+    pub schema_name: Option<String>,
+    /// Filter to a specific view name.
+    pub view_name: Option<String>,
+}
+
+/// Options for [`LabkeyClient::save_query_views`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct SaveQueryViewsOptions {
+    /// Override the client's default container path for this request.
+    pub container_path: Option<String>,
+    /// Marks the saved view(s) as hidden when true.
+    pub hidden: Option<bool>,
+    /// Optional metadata payload forwarded to the server.
+    pub metadata: Option<serde_json::Value>,
+    /// Query name for the view save operation.
+    pub query_name: Option<String>,
+    /// Schema name for the view save operation.
+    pub schema_name: Option<String>,
+    /// Marks the saved view(s) as session scoped when true.
+    pub session: Option<bool>,
+    /// Marks the saved view(s) as shared when true.
+    pub shared: Option<bool>,
+    /// View definitions to create or update.
+    pub views: Option<serde_json::Value>,
+}
+
+/// Options for [`LabkeyClient::save_session_view`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct SaveSessionViewOptions {
+    /// Override the client's default container path for this request.
+    pub container_path: Option<String>,
+    /// Marks the saved view as hidden when true.
+    pub hidden: Option<bool>,
+    /// Makes the saved view available to child containers when true.
+    pub inherit: Option<bool>,
+    /// New non-session view name to save as.
+    pub new_name: Option<String>,
+    /// Query name copied from the session view.
+    pub query_name: Option<String>,
+    /// Replaces an existing target view when true.
+    pub replace: Option<bool>,
+    /// Schema name containing the query.
+    pub schema_name: Option<String>,
+    /// Marks the saved view as shared when true.
+    pub shared: Option<bool>,
+    /// Session view name to persist.
+    pub view_name: Option<String>,
+}
+
+/// Options for [`LabkeyClient::delete_query_view`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct DeleteQueryViewOptions {
+    /// Schema name containing the query.
+    pub schema_name: String,
+    /// Query name containing the view.
+    pub query_name: String,
+    /// Override the client's default container path for this request.
+    pub container_path: Option<String>,
+    /// View name to delete or revert.
+    pub view_name: Option<String>,
+    /// Revert mode flag from `LabKey`'s delete-view API.
+    pub revert: Option<bool>,
+}
+
 /// Query metadata entry in [`GetQueriesResponse`].
 // This endpoint exposes several independent capability flags in one object;
 // preserving bool fields keeps parity with server payload semantics.
@@ -1079,6 +1159,60 @@ struct SaveRowsBody {
     validate_only: Option<bool>,
 }
 
+/// Request body for the `saveQueryViews.api` endpoint.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveQueryViewsBody {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    schema_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    query_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metadata: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    views: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    shared: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hidden: Option<bool>,
+}
+
+/// Request body for the `saveSessionView.api` endpoint.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveSessionViewBody {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    schema_name: Option<String>,
+    #[serde(rename = "query.queryName", skip_serializing_if = "Option::is_none")]
+    query_query_name: Option<String>,
+    #[serde(rename = "query.viewName", skip_serializing_if = "Option::is_none")]
+    query_view_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    shared: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    inherit: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hidden: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    replace: Option<bool>,
+}
+
+/// Request body for the `deleteView.api` endpoint.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteQueryViewBody {
+    schema_name: String,
+    query_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    view_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    complete: Option<bool>,
+}
+
 impl LabkeyClient {
     async fn mutate_rows(
         &self,
@@ -1438,6 +1572,233 @@ impl LabkeyClient {
         .collect();
 
         self.get(url, &params).await
+    }
+
+    /// List available views for a query.
+    ///
+    /// Sends a GET request to `query-getQueryViews.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the HTTP request fails, the server returns
+    /// an error response, or the response body cannot be deserialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::query::GetQueryViewsOptions;
+    ///
+    /// let views = client
+    ///     .get_query_views(
+    ///         GetQueryViewsOptions::builder()
+    ///             .schema_name("lists".to_string())
+    ///             .query_name("People".to_string())
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("View payload keys: {}", views.as_object().map_or(0, |v| v.len()));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_query_views(
+        &self,
+        options: GetQueryViewsOptions,
+    ) -> Result<serde_json::Value, LabkeyError> {
+        let url = self.build_url(
+            "query",
+            "getQueryViews.api",
+            options.container_path.as_deref(),
+        );
+        let params: Vec<(String, String)> = [
+            opt("schemaName", options.schema_name),
+            opt("queryName", options.query_name),
+            opt("viewName", options.view_name),
+            opt("metadata", options.metadata.map(|v| v.to_string())),
+            options
+                .exclude_session_view
+                .and_then(|v| v.then(|| ("excludeSessionView".to_string(), "true".to_string()))),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        self.get(url, &params).await
+    }
+
+    /// Create or update query views.
+    ///
+    /// Sends a POST request to `query-saveQueryViews.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the HTTP request fails, the server returns
+    /// an error response, or the response body cannot be deserialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::query::SaveQueryViewsOptions;
+    ///
+    /// let response = client
+    ///     .save_query_views(
+    ///         SaveQueryViewsOptions::builder()
+    ///             .schema_name("lists".to_string())
+    ///             .query_name("People".to_string())
+    ///             .views(serde_json::json!([{"name": "All"}]))
+    ///             .shared(true)
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("Save payload keys: {}", response.as_object().map_or(0, |v| v.len()));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn save_query_views(
+        &self,
+        options: SaveQueryViewsOptions,
+    ) -> Result<serde_json::Value, LabkeyError> {
+        let url = self.build_url(
+            "query",
+            "saveQueryViews.api",
+            options.container_path.as_deref(),
+        );
+        let body = SaveQueryViewsBody {
+            schema_name: options.schema_name,
+            query_name: options.query_name,
+            metadata: options.metadata,
+            views: options.views,
+            shared: options.shared.and_then(|v| v.then_some(true)),
+            session: options.session.and_then(|v| v.then_some(true)),
+            hidden: options.hidden.and_then(|v| v.then_some(true)),
+        };
+
+        self.post(url, &body).await
+    }
+
+    /// Persist a session view as a named non-session view.
+    ///
+    /// Sends a POST request to `query-saveSessionView.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the HTTP request fails, the server returns
+    /// an error response, or the response body cannot be deserialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::query::SaveSessionViewOptions;
+    ///
+    /// let response = client
+    ///     .save_session_view(
+    ///         SaveSessionViewOptions::builder()
+    ///             .schema_name("lists".to_string())
+    ///             .query_name("People".to_string())
+    ///             .view_name("Session".to_string())
+    ///             .new_name("My Saved View".to_string())
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("Session save response: {}", response);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn save_session_view(
+        &self,
+        options: SaveSessionViewOptions,
+    ) -> Result<serde_json::Value, LabkeyError> {
+        let url = self.build_url(
+            "query",
+            "saveSessionView.api",
+            options.container_path.as_deref(),
+        );
+        let body = SaveSessionViewBody {
+            schema_name: options.schema_name,
+            query_query_name: options.query_name,
+            query_view_name: options.view_name,
+            new_name: options.new_name,
+            shared: options.shared.and_then(|v| v.then_some(true)),
+            inherit: options.inherit.and_then(|v| v.then_some(true)),
+            hidden: options.hidden.and_then(|v| v.then_some(true)),
+            replace: options.replace.and_then(|v| v.then_some(true)),
+        };
+
+        self.post(url, &body).await
+    }
+
+    /// Delete or revert a query view.
+    ///
+    /// Sends a POST request to `query-deleteView.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the HTTP request fails, the server returns
+    /// an error response, or the response body cannot be deserialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::query::DeleteQueryViewOptions;
+    ///
+    /// let response = client
+    ///     .delete_query_view(
+    ///         DeleteQueryViewOptions::builder()
+    ///             .schema_name("lists".to_string())
+    ///             .query_name("People".to_string())
+    ///             .view_name("My Saved View".to_string())
+    ///             .revert(false)
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("Delete response: {}", response);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn delete_query_view(
+        &self,
+        options: DeleteQueryViewOptions,
+    ) -> Result<serde_json::Value, LabkeyError> {
+        let url = self.build_url("query", "deleteView.api", options.container_path.as_deref());
+        let body = DeleteQueryViewBody {
+            schema_name: options.schema_name,
+            query_name: options.query_name,
+            view_name: options.view_name,
+            complete: options.revert.map(|revert| !revert),
+        };
+
+        self.post(url, &body).await
     }
 
     /// Insert rows into a query table.
@@ -2242,6 +2603,30 @@ mod tests {
                 .as_str(),
             "https://labkey.example.com/labkey/Alt/Container/query-getSchemas.api"
         );
+        assert_eq!(
+            client
+                .build_url("query", "getQueryViews.api", Some("/Alt/Container"))
+                .as_str(),
+            "https://labkey.example.com/labkey/Alt/Container/query-getQueryViews.api"
+        );
+        assert_eq!(
+            client
+                .build_url("query", "saveQueryViews.api", Some("/Alt/Container"))
+                .as_str(),
+            "https://labkey.example.com/labkey/Alt/Container/query-saveQueryViews.api"
+        );
+        assert_eq!(
+            client
+                .build_url("query", "saveSessionView.api", Some("/Alt/Container"))
+                .as_str(),
+            "https://labkey.example.com/labkey/Alt/Container/query-saveSessionView.api"
+        );
+        assert_eq!(
+            client
+                .build_url("query", "deleteView.api", Some("/Alt/Container"))
+                .as_str(),
+            "https://labkey.example.com/labkey/Alt/Container/query-deleteView.api"
+        );
 
         assert_eq!(
             client
@@ -2505,5 +2890,114 @@ mod tests {
         assert!(response.committed);
         assert_eq!(response.error_count, 0);
         assert!(response.result.is_empty());
+    }
+
+    #[test]
+    fn save_session_view_body_uses_flat_query_dot_keys() {
+        let body = SaveSessionViewBody {
+            schema_name: Some("lists".to_string()),
+            query_query_name: Some("People".to_string()),
+            query_view_name: Some("Session".to_string()),
+            new_name: Some("Saved".to_string()),
+            shared: Some(true),
+            inherit: None,
+            hidden: None,
+            replace: None,
+        };
+
+        let value = serde_json::to_value(body).expect("should serialize save session body");
+        let obj = value.as_object().expect("body should be object");
+
+        assert_eq!(obj.get("schemaName"), Some(&serde_json::json!("lists")));
+        assert_eq!(
+            obj.get("query.queryName"),
+            Some(&serde_json::json!("People"))
+        );
+        assert_eq!(
+            obj.get("query.viewName"),
+            Some(&serde_json::json!("Session"))
+        );
+        assert_eq!(obj.get("newName"), Some(&serde_json::json!("Saved")));
+        assert_eq!(obj.get("shared"), Some(&serde_json::json!(true)));
+    }
+
+    #[test]
+    fn delete_query_view_body_complete_only_emits_when_revert_is_set() {
+        let body_without_revert = DeleteQueryViewBody {
+            schema_name: "lists".to_string(),
+            query_name: "People".to_string(),
+            view_name: Some("MyView".to_string()),
+            complete: None,
+        };
+        let without_revert =
+            serde_json::to_value(body_without_revert).expect("should serialize without revert");
+        let without_revert_obj = without_revert.as_object().expect("body should be object");
+        assert!(!without_revert_obj.contains_key("complete"));
+
+        let body_revert_true = DeleteQueryViewBody {
+            schema_name: "lists".to_string(),
+            query_name: "People".to_string(),
+            view_name: Some("MyView".to_string()),
+            complete: Some(false),
+        };
+        let revert_true =
+            serde_json::to_value(body_revert_true).expect("should serialize revert true");
+        assert_eq!(revert_true["complete"], serde_json::json!(false));
+
+        let body_revert_false = DeleteQueryViewBody {
+            schema_name: "lists".to_string(),
+            query_name: "People".to_string(),
+            view_name: Some("MyView".to_string()),
+            complete: Some(true),
+        };
+        let revert_false =
+            serde_json::to_value(body_revert_false).expect("should serialize revert false");
+        assert_eq!(revert_false["complete"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn save_query_views_body_omits_false_boolean_flags() {
+        let body = SaveQueryViewsBody {
+            schema_name: Some("lists".to_string()),
+            query_name: Some("People".to_string()),
+            metadata: None,
+            views: Some(serde_json::json!([{"name": "All"}])),
+            shared: None,
+            session: Some(true),
+            hidden: None,
+        };
+
+        let value = serde_json::to_value(body).expect("should serialize save query views body");
+        let obj = value.as_object().expect("body should be object");
+
+        assert_eq!(obj.get("schemaName"), Some(&serde_json::json!("lists")));
+        assert_eq!(obj.get("queryName"), Some(&serde_json::json!("People")));
+        assert_eq!(obj.get("session"), Some(&serde_json::json!(true)));
+        assert!(!obj.contains_key("shared"));
+        assert!(!obj.contains_key("hidden"));
+    }
+
+    #[test]
+    fn save_query_views_body_emits_true_flags_and_metadata() {
+        let body = SaveQueryViewsBody {
+            schema_name: Some("lists".to_string()),
+            query_name: Some("People".to_string()),
+            metadata: Some(serde_json::json!({"scope": "grid"})),
+            views: Some(serde_json::json!([{"name": "All"}])),
+            shared: Some(true),
+            session: None,
+            hidden: Some(true),
+        };
+
+        let value = serde_json::to_value(body).expect("should serialize save query views body");
+        let obj = value.as_object().expect("body should be object");
+
+        assert_eq!(
+            obj.get("metadata"),
+            Some(&serde_json::json!({"scope": "grid"}))
+        );
+        assert_eq!(obj.get("shared"), Some(&serde_json::json!(true)));
+        assert_eq!(obj.get("hidden"), Some(&serde_json::json!(true)));
+        assert!(!obj.contains_key("session"));
     }
 }

@@ -155,8 +155,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented query view management support in src/query.rs by adding GetQueryViewsOptions, SaveQueryViewsOptions, SaveSessionViewOptions, and DeleteQueryViewOptions as non-exhaustive bon-builder option structs. Added LabkeyClient::get_query_views, save_query_views, save_session_view, and delete_query_view with controller/action routes query-getQueryViews.api, query-saveQueryViews.api, query-saveSessionView.api, and query-deleteView.api. Implemented typed body shaping for view mutations to preserve LabKey wire semantics: save_session_view emits flat keys query.queryName/query.viewName, delete_query_view emits complete only when revert is provided (complete = !revert), and save_query_views emits shared/session/hidden only when true while omitting false/None. Added rustdocs with # Errors and no_run # Example sections for all four endpoints. Expanded unit coverage for endpoint URL routing, save-session dot-key serialization, delete complete/revert omission logic, and save-query-views flag/metadata serialization; expanded integration coverage for request URL/body contracts and edge semantics for all four endpoints. Solicited feedback from nick-isms/testing-guru/semver-nag, incorporated follow-up fixes (metadata forwarding and full true-flag coverage), and verified all quality gates with just check before and after feedback updates."
     },
     {
       "id": "US-009",
