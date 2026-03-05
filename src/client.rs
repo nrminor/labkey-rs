@@ -230,6 +230,19 @@ impl LabkeyClient {
         Ok(builder.build()?)
     }
 
+    fn build_post_request_with_params(
+        &self,
+        client: &reqwest::Client,
+        url: Url,
+        params: &[(String, String)],
+        options: &RequestOptions,
+    ) -> Result<reqwest::Request, LabkeyError> {
+        let builder = client.post(url).query(params);
+        let builder = self.prepare_request(builder);
+        let builder = Self::apply_request_options(builder, options);
+        Ok(builder.build()?)
+    }
+
     /// Send a GET request and deserialize the JSON response.
     pub(crate) async fn get<T: serde::de::DeserializeOwned>(
         &self,
@@ -311,6 +324,20 @@ impl LabkeyClient {
         let request = self.build_post_request_without_body(&client, url, options)?;
         let response = client.execute(request).await?;
         self.handle_empty_response(response, &options.accepted_statuses)
+            .await
+    }
+
+    /// Send a POST request with query parameters and deserialize the JSON response.
+    pub(crate) async fn post_with_params_with_options<T: serde::de::DeserializeOwned>(
+        &self,
+        url: Url,
+        params: &[(String, String)],
+        options: &RequestOptions,
+    ) -> Result<T, LabkeyError> {
+        let client = self.client_for_options(options);
+        let request = self.build_post_request_with_params(&client, url, params, options)?;
+        let response = client.execute(request).await?;
+        self.handle_response(response, &options.accepted_statuses)
             .await
     }
 
@@ -618,5 +645,39 @@ mod tests {
             .expect("should build request");
 
         assert_eq!(request.timeout(), Some(&Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn build_post_request_with_params_matches_expected_query_and_headers() {
+        let client = test_client("https://labkey.example.com/labkey", "/MyProject/MyFolder");
+        let url = client.build_url("pipeline-analysis", "startAnalysis.api", None);
+        let params = vec![
+            ("protocolName".to_string(), "RNAseq".to_string()),
+            ("taskId".to_string(), "pipeline-123".to_string()),
+        ];
+
+        let request = client
+            .build_post_request_with_params(&client.http, url, &params, &RequestOptions::default())
+            .expect("should build request");
+
+        assert_eq!(request.method(), reqwest::Method::POST);
+        assert_eq!(
+            request.url().as_str(),
+            "https://labkey.example.com/labkey/MyProject/MyFolder/pipeline-analysis-startAnalysis.api?protocolName=RNAseq&taskId=pipeline-123"
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get("x-requested-with")
+                .and_then(|v| v.to_str().ok()),
+            Some("XMLHttpRequest")
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get("authorization")
+                .and_then(|v| v.to_str().ok()),
+            Some("Basic YXBpa2V5OnRlc3Qta2V5")
+        );
     }
 }

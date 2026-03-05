@@ -31,6 +31,7 @@
 !/src/domain.rs
 !/src/experiment.rs
 !/src/filter.rs
+!/src/pipeline.rs
 !/src/query.rs
 !/src/security
 !/src/security/mod.rs

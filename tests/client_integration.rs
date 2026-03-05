@@ -10,6 +10,9 @@ use labkey_rs::client::__internal_test_support;
 use labkey_rs::common::AuditBehavior;
 use labkey_rs::experiment::{LineageOptions, ResolveOptions};
 use labkey_rs::filter::Filter;
+use labkey_rs::pipeline::{
+    GetFileStatusOptions, GetPipelineContainerOptions, GetProtocolsOptions, StartAnalysisOptions,
+};
 use labkey_rs::query::{
     CommandType, DataViewType, DeleteQueryViewOptions, DeleteRowsOptions, ExecuteSqlOptions,
     GetDataAggregate, GetDataFilter, GetDataOptions, GetDataPivot, GetDataSort,
@@ -142,6 +145,285 @@ async fn import_run_json_mode_uses_json_part_content_type() {
 
     assert!(response.success);
     assert_eq!(response.run_id, Some(101));
+}
+
+#[tokio::test]
+async fn get_file_status_posts_query_params_and_no_json_body() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/MyProject/MyFolder/pipeline-analysis-getFileStatus.api",
+        ))
+        .and(query_param("file", "run1.tsv"))
+        .and(query_param("file", "run2.tsv"))
+        .and(query_param("path", "imports"))
+        .and(query_param("protocolName", "RNAseq"))
+        .and(query_param("taskId", "task-1"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_string(""))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "files": [{"name": "run1.tsv", "status": "READY"}],
+            "submitType": "Analyze"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .get_file_status(
+            GetFileStatusOptions::builder()
+                .files(vec!["run1.tsv".to_string(), "run2.tsv".to_string()])
+                .path("imports".to_string())
+                .protocol_name("RNAseq".to_string())
+                .task_id("task-1".to_string())
+                .build(),
+        )
+        .await
+        .expect("get_file_status should succeed");
+
+    assert_eq!(response.submit_type.as_deref(), Some("Analyze"));
+    assert_eq!(response.files.len(), 1);
+}
+
+#[tokio::test]
+async fn get_pipeline_container_uses_expected_get_route() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path(
+            "/MyProject/MyFolder/pipeline-getPipelineContainer.api",
+        ))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "containerPath": "/Home/Project",
+            "webDavURL": "https://labkey.example.com/_webdav/Home/Project"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .get_pipeline_container(GetPipelineContainerOptions::builder().build())
+        .await
+        .expect("get_pipeline_container should succeed");
+
+    assert_eq!(response.container_path.as_deref(), Some("/Home/Project"));
+}
+
+#[tokio::test]
+async fn get_protocols_posts_query_params_with_default_include_workbooks_false() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/MyProject/MyFolder/pipeline-analysis-getSavedProtocols.api",
+        ))
+        .and(query_param("includeWorkbooks", "false"))
+        .and(query_param("path", "imports"))
+        .and(query_param("taskId", "task-1"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_string(""))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "protocols": [{"name": "RNAseq"}],
+            "defaultProtocolName": "RNAseq"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .get_protocols(
+            GetProtocolsOptions::builder()
+                .path("imports".to_string())
+                .task_id("task-1".to_string())
+                .build(),
+        )
+        .await
+        .expect("get_protocols should succeed");
+
+    assert_eq!(response.protocols.len(), 1);
+    assert_eq!(response.default_protocol_name.as_deref(), Some("RNAseq"));
+}
+
+#[tokio::test]
+async fn start_analysis_posts_query_params_with_configure_json() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/MyProject/MyFolder/pipeline-analysis-startAnalysis.api",
+        ))
+        .and(query_param("allowNonExistentFiles", "true"))
+        .and(query_param("file", "run1.tsv"))
+        .and(query_param("fileIds", "101"))
+        .and(query_param("path", "imports"))
+        .and(query_param("protocolName", "RNAseq"))
+        .and(query_param("saveProtocol", "true"))
+        .and(query_param("taskId", "task-1"))
+        .and(query_param("configureJson", "{\"alpha\":1}"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_string(""))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true,
+            "description": "Started"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .start_analysis(
+            StartAnalysisOptions::builder()
+                .allow_non_existent_files(true)
+                .file_ids(vec![101])
+                .files(vec!["run1.tsv".to_string()])
+                .json_parameters(serde_json::json!({"alpha": 1}))
+                .path("imports".to_string())
+                .protocol_name("RNAseq".to_string())
+                .task_id("task-1".to_string())
+                .build(),
+        )
+        .await
+        .expect("start_analysis should succeed");
+
+    assert_eq!(response["success"], serde_json::json!(true));
+}
+
+#[tokio::test]
+async fn start_analysis_honors_container_path_override() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Folder/pipeline-analysis-startAnalysis.api"))
+        .and(query_param("file", "run1.tsv"))
+        .and(query_param("fileIds", "101"))
+        .and(query_param("path", "imports"))
+        .and(query_param("protocolName", "RNAseq"))
+        .and(query_param("taskId", "task-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .start_analysis(
+            StartAnalysisOptions::builder()
+                .container_path("/Alt/Folder".to_string())
+                .file_ids(vec![101])
+                .files(vec!["run1.tsv".to_string()])
+                .path("imports".to_string())
+                .protocol_name("RNAseq".to_string())
+                .task_id("task-1".to_string())
+                .build(),
+        )
+        .await
+        .expect("start_analysis with container override should succeed");
+
+    assert_eq!(response["success"], serde_json::json!(true));
+}
+
+#[tokio::test]
+async fn get_file_status_timeout_maps_to_http_error() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/MyProject/MyFolder/pipeline-analysis-getFileStatus.api",
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(Duration::from_millis(100))
+                .set_body_json(serde_json::json!({
+                    "files": [],
+                    "submitType": "Analyze"
+                })),
+        )
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let error = client
+        .get_file_status(
+            GetFileStatusOptions::builder()
+                .files(vec!["run1.tsv".to_string()])
+                .path("imports".to_string())
+                .protocol_name("RNAseq".to_string())
+                .task_id("task-1".to_string())
+                .timeout(Duration::from_millis(10))
+                .build(),
+        )
+        .await
+        .expect_err("request should timeout");
+
+    assert!(matches!(error, LabkeyError::Http(_)));
+}
+
+#[tokio::test]
+async fn start_analysis_json_error_maps_to_api_error() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/MyProject/MyFolder/pipeline-analysis-startAnalysis.api",
+        ))
+        .respond_with(
+            ResponseTemplate::new(400)
+                .set_body_json(fixture::<serde_json::Value>("api_error.json")),
+        )
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let error = client
+        .start_analysis(
+            StartAnalysisOptions::builder()
+                .file_ids(vec![101])
+                .files(vec!["run1.tsv".to_string()])
+                .path("imports".to_string())
+                .protocol_name("RNAseq".to_string())
+                .task_id("task-1".to_string())
+                .build(),
+        )
+        .await
+        .expect_err("request should fail");
+
+    assert!(matches!(error, LabkeyError::Api { .. }));
+}
+
+#[tokio::test]
+async fn start_analysis_non_json_error_maps_to_unexpected_response() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/MyProject/MyFolder/pipeline-analysis-startAnalysis.api",
+        ))
+        .respond_with(ResponseTemplate::new(500).set_body_string("not-json"))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let error = client
+        .start_analysis(
+            StartAnalysisOptions::builder()
+                .file_ids(vec![101])
+                .files(vec!["run1.tsv".to_string()])
+                .path("imports".to_string())
+                .protocol_name("RNAseq".to_string())
+                .task_id("task-1".to_string())
+                .build(),
+        )
+        .await
+        .expect_err("request should fail");
+
+    assert!(matches!(error, LabkeyError::UnexpectedResponse { .. }));
 }
 
 #[tokio::test]
