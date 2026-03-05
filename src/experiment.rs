@@ -1,11 +1,17 @@
-//! Experiment models and lineage endpoints.
+//! Experiment models and APIs for lineage, batch, run, and sequence operations.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
-use crate::{client::LabkeyClient, common::opt, error::LabkeyError};
+use crate::{
+    client::{LabkeyClient, RequestOptions},
+    common::opt,
+    error::LabkeyError,
+    query::{InsertRowsOptions, ModifyRowsResults},
+};
 
 /// Experiment entity type filter values used by lineage APIs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,6 +51,37 @@ pub enum SeqType {
     /// Sample count sequence.
     #[serde(rename = "sampleCount")]
     SampleCount,
+}
+
+impl SeqType {
+    const fn as_wire(self) -> &'static str {
+        match self {
+            Self::GenId => "genId",
+            Self::RootSampleCount => "rootSampleCount",
+            Self::SampleCount => "sampleCount",
+        }
+    }
+}
+
+/// Entity kind values used by sequence APIs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum EntityKindName {
+    /// Sequence attached to a data class.
+    #[serde(rename = "DataClass")]
+    DataClass,
+    /// Sequence attached to a sample set.
+    #[serde(rename = "SampleSet")]
+    SampleSet,
+}
+
+impl EntityKindName {
+    const fn as_wire(self) -> &'static str {
+        match self {
+            Self::DataClass => "DataClass",
+            Self::SampleSet => "SampleSet",
+        }
+    }
 }
 
 /// Primary-key filter element for experiment entities.
@@ -354,10 +391,330 @@ pub struct ResolveOptions {
     pub include_run_steps: Option<bool>,
 }
 
+/// One-of input for [`LabkeyClient::create_hidden_run_group`].
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum HiddenRunGroupMembers {
+    /// Use explicit run row IDs.
+    RunIds(Vec<i64>),
+    /// Use a `DataRegion` selection key.
+    SelectionKey(String),
+}
+
+/// Options for [`LabkeyClient::save_batch`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct SaveBatchOptions {
+    /// The assay protocol id.
+    pub assay_id: i64,
+    /// Modified run group to save.
+    pub batch: RunGroup,
+    /// Optional assay name.
+    pub assay_name: Option<String>,
+    /// Optional protocol name for non-assay-backed runs.
+    pub protocol_name: Option<String>,
+    /// Optional assay provider name.
+    pub provider_name: Option<String>,
+    /// Optional container override for request routing.
+    pub container_path: Option<String>,
+    /// Optional request timeout override.
+    pub timeout: Option<Duration>,
+}
+
+/// Options for [`LabkeyClient::save_batches`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct SaveBatchesOptions {
+    /// The assay protocol id.
+    pub assay_id: i64,
+    /// Modified run groups to save.
+    pub batches: Vec<RunGroup>,
+    /// Optional assay name.
+    pub assay_name: Option<String>,
+    /// Optional protocol name for non-assay-backed runs.
+    pub protocol_name: Option<String>,
+    /// Optional assay provider name.
+    pub provider_name: Option<String>,
+    /// Optional container override for request routing.
+    pub container_path: Option<String>,
+    /// Optional request timeout override.
+    pub timeout: Option<Duration>,
+}
+
+/// Options for [`LabkeyClient::load_batch`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct LoadBatchOptions {
+    /// The assay protocol id.
+    pub assay_id: Option<i64>,
+    /// Optional assay name.
+    pub assay_name: Option<String>,
+    /// Batch id to load.
+    pub batch_id: i64,
+    /// Optional protocol name for non-assay-backed runs.
+    pub protocol_name: Option<String>,
+    /// Optional assay provider name.
+    pub provider_name: Option<String>,
+    /// Optional container override for request routing.
+    pub container_path: Option<String>,
+    /// Optional request timeout override.
+    pub timeout: Option<Duration>,
+}
+
+/// Options for [`LabkeyClient::load_batches`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct LoadBatchesOptions {
+    /// The assay protocol id.
+    pub assay_id: Option<i64>,
+    /// Optional assay name.
+    pub assay_name: Option<String>,
+    /// Batch ids to load.
+    pub batch_ids: Vec<i64>,
+    /// Optional protocol name for non-assay-backed runs.
+    pub protocol_name: Option<String>,
+    /// Optional assay provider name.
+    pub provider_name: Option<String>,
+    /// Optional container override for request routing.
+    pub container_path: Option<String>,
+    /// Optional request timeout override.
+    pub timeout: Option<Duration>,
+}
+
+/// Options for [`LabkeyClient::load_runs`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct LoadRunsOptions {
+    /// Optional container override for request routing.
+    pub container_path: Option<String>,
+    /// Optional request timeout override.
+    pub timeout: Option<Duration>,
+    /// Run LSIDs to load.
+    pub lsids: Option<Vec<String>>,
+    /// Run row IDs to load.
+    pub run_ids: Option<Vec<i64>>,
+    /// Include run and step inputs and outputs.
+    pub include_inputs_and_outputs: Option<bool>,
+    /// Include experiment object properties.
+    pub include_properties: Option<bool>,
+    /// Include run steps.
+    pub include_run_steps: Option<bool>,
+}
+
+/// Options for [`LabkeyClient::save_runs`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct SaveRunsOptions {
+    /// Runs to save.
+    pub runs: Vec<Run>,
+    /// Optional assay protocol id.
+    pub assay_id: Option<i64>,
+    /// Optional assay name.
+    pub assay_name: Option<String>,
+    /// Optional protocol name for non-assay-backed runs.
+    pub protocol_name: Option<String>,
+    /// Optional assay provider name.
+    pub provider_name: Option<String>,
+    /// Optional container override for request routing.
+    pub container_path: Option<String>,
+    /// Optional request timeout override.
+    pub timeout: Option<Duration>,
+}
+
+/// Options for [`LabkeyClient::save_materials`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct SaveMaterialsOptions {
+    /// Name of the sample set query.
+    pub name: String,
+    /// Material rows to save.
+    pub materials: Vec<serde_json::Value>,
+    /// Optional container override for request routing.
+    pub container_path: Option<String>,
+}
+
+/// Options for [`LabkeyClient::create_hidden_run_group`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct CreateHiddenRunGroupOptions {
+    /// Exactly one member-selection mode.
+    pub members: HiddenRunGroupMembers,
+    /// Optional container override for request routing.
+    pub container_path: Option<String>,
+    /// Optional request timeout override.
+    pub timeout: Option<Duration>,
+}
+
+/// Options for [`LabkeyClient::set_entity_sequence`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct SetEntitySequenceOptions {
+    /// Sequence type to update.
+    pub seq_type: SeqType,
+    /// Optional container override for request routing.
+    pub container_path: Option<String>,
+    /// Optional entity kind.
+    pub kind_name: Option<EntityKindName>,
+    /// Optional new value for the sequence.
+    pub new_value: Option<i64>,
+    /// Optional entity row ID.
+    pub row_id: Option<i64>,
+    /// Optional request timeout override.
+    pub timeout: Option<Duration>,
+}
+
+/// Options for [`LabkeyClient::get_entity_sequence`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct GetEntitySequenceOptions {
+    /// Sequence type to read.
+    pub seq_type: SeqType,
+    /// Optional container override for request routing.
+    pub container_path: Option<String>,
+    /// Optional entity kind.
+    pub kind_name: Option<EntityKindName>,
+    /// Optional entity row ID.
+    pub row_id: Option<i64>,
+}
+
+/// Response from [`LabkeyClient::set_entity_sequence`] and [`LabkeyClient::get_entity_sequence`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct EntitySequenceResponse {
+    /// Sequence type.
+    #[serde(default)]
+    pub seq_type: Option<String>,
+    /// Entity kind.
+    #[serde(default)]
+    pub kind_name: Option<String>,
+    /// Entity row id.
+    #[serde(default)]
+    pub row_id: Option<i64>,
+    /// Updated sequence value when present.
+    #[serde(default)]
+    pub new_value: Option<i64>,
+    /// Returned sequence value when present.
+    #[serde(default)]
+    pub value: Option<i64>,
+    /// Additional server-provided keys.
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveBatchesBody {
+    assay_id: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assay_name: Option<String>,
+    batches: Vec<RunGroup>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    protocol_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider_name: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadBatchBody {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assay_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assay_name: Option<String>,
+    batch_id: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    protocol_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider_name: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadBatchesBody {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assay_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assay_name: Option<String>,
+    batch_ids: Vec<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    protocol_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider_name: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadRunsBody {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    run_ids: Option<Vec<i64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lsids: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    include_inputs_and_outputs: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    include_properties: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    include_run_steps: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveRunsBody {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assay_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assay_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    protocol_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider_name: Option<String>,
+    runs: Vec<Run>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateHiddenRunGroupBody {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    run_ids: Option<Vec<i64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    selection_key: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SetEntitySequenceBody {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    row_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind_name: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_value: Option<i64>,
+    seq_type: SeqType,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ResolveEnvelope {
     data: Vec<LineageNode>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadBatchEnvelope {
+    batch: RunGroup,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadBatchesEnvelope {
+    batches: Vec<RunGroup>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadRunsEnvelope {
+    runs: Vec<Run>,
 }
 
 fn build_lineage_params(options: &LineageOptions) -> Vec<(String, String)> {
@@ -420,6 +777,113 @@ fn build_resolve_params(options: &ResolveOptions) -> Vec<(String, String)> {
     params
 }
 
+fn build_save_batch_body(options: SaveBatchOptions) -> SaveBatchesBody {
+    SaveBatchesBody {
+        assay_id: options.assay_id,
+        assay_name: options.assay_name,
+        batches: vec![options.batch],
+        protocol_name: options.protocol_name,
+        provider_name: options.provider_name,
+    }
+}
+
+fn build_save_batches_body(options: SaveBatchesOptions) -> SaveBatchesBody {
+    SaveBatchesBody {
+        assay_id: options.assay_id,
+        assay_name: options.assay_name,
+        batches: options.batches,
+        protocol_name: options.protocol_name,
+        provider_name: options.provider_name,
+    }
+}
+
+fn build_load_batch_body(options: LoadBatchOptions) -> LoadBatchBody {
+    LoadBatchBody {
+        assay_id: options.assay_id,
+        assay_name: options.assay_name,
+        batch_id: options.batch_id,
+        protocol_name: options.protocol_name,
+        provider_name: options.provider_name,
+    }
+}
+
+fn build_load_batches_body(options: LoadBatchesOptions) -> LoadBatchesBody {
+    LoadBatchesBody {
+        assay_id: options.assay_id,
+        assay_name: options.assay_name,
+        batch_ids: options.batch_ids,
+        protocol_name: options.protocol_name,
+        provider_name: options.provider_name,
+    }
+}
+
+fn build_load_runs_body(options: LoadRunsOptions) -> LoadRunsBody {
+    LoadRunsBody {
+        run_ids: options.run_ids,
+        lsids: options.lsids,
+        include_inputs_and_outputs: options.include_inputs_and_outputs,
+        include_properties: options.include_properties,
+        include_run_steps: options.include_run_steps,
+    }
+}
+
+fn build_save_runs_body(options: SaveRunsOptions) -> SaveRunsBody {
+    SaveRunsBody {
+        assay_id: options.assay_id,
+        assay_name: options.assay_name,
+        protocol_name: options.protocol_name,
+        provider_name: options.provider_name,
+        runs: options.runs,
+    }
+}
+
+fn build_create_hidden_run_group_body(members: HiddenRunGroupMembers) -> CreateHiddenRunGroupBody {
+    match members {
+        HiddenRunGroupMembers::RunIds(run_ids) => CreateHiddenRunGroupBody {
+            run_ids: Some(run_ids),
+            selection_key: None,
+        },
+        HiddenRunGroupMembers::SelectionKey(selection_key) => CreateHiddenRunGroupBody {
+            run_ids: None,
+            selection_key: Some(selection_key),
+        },
+    }
+}
+
+fn build_set_entity_sequence_body(options: &SetEntitySequenceOptions) -> SetEntitySequenceBody {
+    SetEntitySequenceBody {
+        row_id: options.row_id,
+        kind_name: options.kind_name.map(EntityKindName::as_wire),
+        new_value: options.new_value,
+        seq_type: options.seq_type,
+    }
+}
+
+fn build_get_entity_sequence_params(options: &GetEntitySequenceOptions) -> Vec<(String, String)> {
+    [
+        opt("rowId", options.row_id),
+        options
+            .kind_name
+            .map(|value| ("kindName".to_string(), value.as_wire().to_string())),
+        Some((
+            "seqType".to_string(),
+            options.seq_type.as_wire().to_string(),
+        )),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+fn save_materials_to_insert_rows_options(options: SaveMaterialsOptions) -> InsertRowsOptions {
+    InsertRowsOptions::builder()
+        .schema_name("Samples".to_string())
+        .query_name(options.name)
+        .rows(options.materials)
+        .maybe_container_path(options.container_path)
+        .build()
+}
+
 fn extract_resolve_response(response: &serde_json::Value) -> Result<ResolveResponse, LabkeyError> {
     serde_json::from_value::<ResolveEnvelope>(response.clone())
         .map(|envelope| ResolveResponse {
@@ -428,6 +892,44 @@ fn extract_resolve_response(response: &serde_json::Value) -> Result<ResolveRespo
         .map_err(|_| LabkeyError::UnexpectedResponse {
             status: StatusCode::OK,
             text: format!("invalid resolve response: {response}"),
+        })
+}
+
+fn extract_batch_response(response: &serde_json::Value) -> Result<RunGroup, LabkeyError> {
+    serde_json::from_value::<LoadBatchEnvelope>(response.clone())
+        .map(|envelope| envelope.batch)
+        .map_err(|_| LabkeyError::UnexpectedResponse {
+            status: StatusCode::OK,
+            text: format!("invalid load_batch response: {response}"),
+        })
+}
+
+fn extract_batches_response(response: &serde_json::Value) -> Result<Vec<RunGroup>, LabkeyError> {
+    serde_json::from_value::<LoadBatchesEnvelope>(response.clone())
+        .map(|envelope| envelope.batches)
+        .map_err(|_| LabkeyError::UnexpectedResponse {
+            status: StatusCode::OK,
+            text: format!("invalid batches response: {response}"),
+        })
+}
+
+fn extract_runs_response(response: &serde_json::Value) -> Result<Vec<Run>, LabkeyError> {
+    serde_json::from_value::<LoadRunsEnvelope>(response.clone())
+        .map(|envelope| envelope.runs)
+        .map_err(|_| LabkeyError::UnexpectedResponse {
+            status: StatusCode::OK,
+            text: format!("invalid runs response: {response}"),
+        })
+}
+
+fn extract_single_batch_response(response: &serde_json::Value) -> Result<RunGroup, LabkeyError> {
+    let batches = extract_batches_response(response)?;
+    batches
+        .into_iter()
+        .next()
+        .ok_or(LabkeyError::UnexpectedResponse {
+            status: StatusCode::OK,
+            text: format!("invalid save_batch response: {response}"),
         })
 }
 
@@ -483,6 +985,117 @@ fn validate_resolve_options(options: &ResolveOptions) -> Result<(), LabkeyError>
     }
 
     Ok(())
+}
+
+fn validate_assay_identity(
+    assay_id: Option<i64>,
+    assay_name: Option<&str>,
+    endpoint: &str,
+) -> Result<(), LabkeyError> {
+    if assay_id.is_none() && assay_name.is_none_or(str::is_empty) {
+        return Err(LabkeyError::InvalidInput(format!(
+            "{endpoint} requires one of `assay_id` or `assay_name`"
+        )));
+    }
+
+    Ok(())
+}
+
+fn validate_save_batches_options(options: &SaveBatchesOptions) -> Result<(), LabkeyError> {
+    if options.batches.is_empty() {
+        return Err(LabkeyError::InvalidInput(
+            "save_batches `batches` must not be empty".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_load_batch_options(options: &LoadBatchOptions) -> Result<(), LabkeyError> {
+    validate_assay_identity(
+        options.assay_id,
+        options.assay_name.as_deref(),
+        "load_batch",
+    )
+}
+
+fn validate_load_batches_options(options: &LoadBatchesOptions) -> Result<(), LabkeyError> {
+    validate_assay_identity(
+        options.assay_id,
+        options.assay_name.as_deref(),
+        "load_batches",
+    )?;
+
+    if options.batch_ids.is_empty() {
+        return Err(LabkeyError::InvalidInput(
+            "load_batches `batch_ids` must not be empty".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_load_runs_options(options: &LoadRunsOptions) -> Result<(), LabkeyError> {
+    if let Some(run_ids) = options.run_ids.as_ref()
+        && run_ids.is_empty()
+    {
+        return Err(LabkeyError::InvalidInput(
+            "load_runs `run_ids` must not be empty".to_string(),
+        ));
+    }
+
+    if let Some(lsids) = options.lsids.as_ref() {
+        if lsids.is_empty() {
+            return Err(LabkeyError::InvalidInput(
+                "load_runs `lsids` must not be empty".to_string(),
+            ));
+        }
+        if lsids.iter().any(|value| value.trim().is_empty()) {
+            return Err(LabkeyError::InvalidInput(
+                "load_runs `lsids` entries must not be blank".to_string(),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_save_runs_options(options: &SaveRunsOptions) -> Result<(), LabkeyError> {
+    if options.runs.is_empty() {
+        return Err(LabkeyError::InvalidInput(
+            "save_runs `runs` must not be empty".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_save_materials_options(options: &SaveMaterialsOptions) -> Result<(), LabkeyError> {
+    if options.name.trim().is_empty() {
+        return Err(LabkeyError::InvalidInput(
+            "save_materials `name` must not be blank".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_create_hidden_run_group_options(
+    options: &CreateHiddenRunGroupOptions,
+) -> Result<(), LabkeyError> {
+    match options.members {
+        HiddenRunGroupMembers::RunIds(ref run_ids) if run_ids.is_empty() => {
+            Err(LabkeyError::InvalidInput(
+                "create_hidden_run_group `run_ids` must not be empty".to_string(),
+            ))
+        }
+        HiddenRunGroupMembers::SelectionKey(ref key) if key.trim().is_empty() => {
+            Err(LabkeyError::InvalidInput(
+                "create_hidden_run_group `selection_key` must not be blank".to_string(),
+            ))
+        }
+        _ => Ok(()),
+    }
 }
 
 impl LabkeyClient {
@@ -566,6 +1179,517 @@ impl LabkeyClient {
         let params = build_resolve_params(&options);
         let response: serde_json::Value = self.get(url, &params).await?;
         extract_resolve_response(&response)
+    }
+
+    /// Save a single assay batch through `assay-saveAssayBatch.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the request fails, the server reports an API
+    /// error, or the response cannot be parsed.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::experiment::{ExpObject, RunGroup, SaveBatchOptions};
+    ///
+    /// let _ = client
+    ///     .save_batch(
+    ///         SaveBatchOptions::builder()
+    ///             .assay_id(101)
+    ///             .batch(RunGroup {
+    ///                 exp_object: ExpObject {
+    ///                     name: Some("batch-1".to_string()),
+    ///                     ..ExpObject {
+    ///                         comment: None,
+    ///                         container: None,
+    ///                         container_path: None,
+    ///                         cpas_type: None,
+    ///                         created: None,
+    ///                         created_by: None,
+    ///                         id: None,
+    ///                         lsid: None,
+    ///                         modified: None,
+    ///                         modified_by: None,
+    ///                         name: None,
+    ///                         pk_filters: vec![],
+    ///                         query_name: None,
+    ///                         restricted: None,
+    ///                         schema_name: None,
+    ///                         type_: None,
+    ///                         url: None,
+    ///                         properties: None,
+    ///                     }
+    ///                 },
+    ///                 batch_protocol_id: None,
+    ///                 hidden: None,
+    ///                 runs: vec![],
+    ///             })
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn save_batch(&self, options: SaveBatchOptions) -> Result<RunGroup, LabkeyError> {
+        validate_assay_identity(
+            Some(options.assay_id),
+            options.assay_name.as_deref(),
+            "save_batch",
+        )?;
+        let timeout = options.timeout;
+        let container_path = options.container_path.clone();
+        let body = build_save_batch_body(options);
+        let url = self.build_url("assay", "saveAssayBatch.api", container_path.as_deref());
+        let response: serde_json::Value = self
+            .post_with_options(
+                url,
+                &body,
+                &RequestOptions {
+                    timeout,
+                    ..RequestOptions::default()
+                },
+            )
+            .await?;
+        extract_single_batch_response(&response)
+    }
+
+    /// Save multiple assay batches through `assay-saveAssayBatch.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the request fails, the server reports an API
+    /// error, or the response cannot be parsed.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::experiment::SaveBatchesOptions;
+    ///
+    /// let _ = client
+    ///     .save_batches(
+    ///         SaveBatchesOptions::builder()
+    ///             .assay_id(101)
+    ///             .batches(vec![])
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn save_batches(
+        &self,
+        options: SaveBatchesOptions,
+    ) -> Result<Vec<RunGroup>, LabkeyError> {
+        validate_save_batches_options(&options)?;
+        validate_assay_identity(
+            Some(options.assay_id),
+            options.assay_name.as_deref(),
+            "save_batches",
+        )?;
+        let timeout = options.timeout;
+        let container_path = options.container_path.clone();
+        let body = build_save_batches_body(options);
+        let url = self.build_url("assay", "saveAssayBatch.api", container_path.as_deref());
+        let response: serde_json::Value = self
+            .post_with_options(
+                url,
+                &body,
+                &RequestOptions {
+                    timeout,
+                    ..RequestOptions::default()
+                },
+            )
+            .await?;
+        extract_batches_response(&response)
+    }
+
+    /// Load a single assay batch through `assay-getAssayBatch.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the request fails, the server reports an API
+    /// error, or the response envelope does not include `batch`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::experiment::LoadBatchOptions;
+    ///
+    /// let _ = client
+    ///     .load_batch(
+    ///         LoadBatchOptions::builder()
+    ///             .batch_id(10)
+    ///             .assay_id(101)
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn load_batch(&self, options: LoadBatchOptions) -> Result<RunGroup, LabkeyError> {
+        validate_load_batch_options(&options)?;
+        let timeout = options.timeout;
+        let container_path = options.container_path.clone();
+        let body = build_load_batch_body(options);
+        let url = self.build_url("assay", "getAssayBatch.api", container_path.as_deref());
+        let response: serde_json::Value = self
+            .post_with_options(
+                url,
+                &body,
+                &RequestOptions {
+                    timeout,
+                    ..RequestOptions::default()
+                },
+            )
+            .await?;
+        extract_batch_response(&response)
+    }
+
+    /// Load multiple assay batches through `assay-getAssayBatches.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the request fails, the server reports an API
+    /// error, or the response envelope does not include `batches`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::experiment::LoadBatchesOptions;
+    ///
+    /// let _ = client
+    ///     .load_batches(
+    ///         LoadBatchesOptions::builder()
+    ///             .batch_ids(vec![10, 11])
+    ///             .assay_name("General".to_string())
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn load_batches(
+        &self,
+        options: LoadBatchesOptions,
+    ) -> Result<Vec<RunGroup>, LabkeyError> {
+        validate_load_batches_options(&options)?;
+        let timeout = options.timeout;
+        let container_path = options.container_path.clone();
+        let body = build_load_batches_body(options);
+        let url = self.build_url("assay", "getAssayBatches.api", container_path.as_deref());
+        let response: serde_json::Value = self
+            .post_with_options(
+                url,
+                &body,
+                &RequestOptions {
+                    timeout,
+                    ..RequestOptions::default()
+                },
+            )
+            .await?;
+        extract_batches_response(&response)
+    }
+
+    /// Load assay runs through `assay-getAssayRuns.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the request fails, the server reports an API
+    /// error, or the response envelope does not include `runs`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::experiment::LoadRunsOptions;
+    ///
+    /// let _ = client
+    ///     .load_runs(
+    ///         LoadRunsOptions::builder()
+    ///             .lsids(vec!["urn:lsid:test:run-1".to_string()])
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn load_runs(&self, options: LoadRunsOptions) -> Result<Vec<Run>, LabkeyError> {
+        validate_load_runs_options(&options)?;
+        let timeout = options.timeout;
+        let container_path = options.container_path.clone();
+        let body = build_load_runs_body(options);
+        let url = self.build_url("assay", "getAssayRuns.api", container_path.as_deref());
+        let response: serde_json::Value = self
+            .post_with_options(
+                url,
+                &body,
+                &RequestOptions {
+                    timeout,
+                    ..RequestOptions::default()
+                },
+            )
+            .await?;
+        extract_runs_response(&response)
+    }
+
+    /// Save modified assay runs through `assay-saveAssayRuns.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the request fails, the server reports an API
+    /// error, or the response envelope does not include `runs`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::experiment::SaveRunsOptions;
+    ///
+    /// let _ = client
+    ///     .save_runs(SaveRunsOptions::builder().runs(vec![]).build())
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn save_runs(&self, options: SaveRunsOptions) -> Result<Vec<Run>, LabkeyError> {
+        validate_save_runs_options(&options)?;
+        let timeout = options.timeout;
+        let container_path = options.container_path.clone();
+        let body = build_save_runs_body(options);
+        let url = self.build_url("assay", "saveAssayRuns.api", container_path.as_deref());
+        let response: serde_json::Value = self
+            .post_with_options(
+                url,
+                &body,
+                &RequestOptions {
+                    timeout,
+                    ..RequestOptions::default()
+                },
+            )
+            .await?;
+        extract_runs_response(&response)
+    }
+
+    /// Save material rows by delegating to [`LabkeyClient::insert_rows`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the delegated insert-rows request fails.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::experiment::SaveMaterialsOptions;
+    ///
+    /// let _ = client
+    ///     .save_materials(
+    ///         SaveMaterialsOptions::builder()
+    ///             .name("MySamples".to_string())
+    ///             .materials(vec![])
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn save_materials(
+        &self,
+        options: SaveMaterialsOptions,
+    ) -> Result<ModifyRowsResults, LabkeyError> {
+        validate_save_materials_options(&options)?;
+        self.insert_rows(save_materials_to_insert_rows_options(options))
+            .await
+    }
+
+    /// Create or recycle a hidden run group through `experiment-createHiddenRunGroup.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the request fails or the response cannot be
+    /// parsed as a [`RunGroup`].
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::experiment::{CreateHiddenRunGroupOptions, HiddenRunGroupMembers};
+    ///
+    /// let _ = client
+    ///     .create_hidden_run_group(
+    ///         CreateHiddenRunGroupOptions::builder()
+    ///             .members(HiddenRunGroupMembers::RunIds(vec![1, 2]))
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn create_hidden_run_group(
+        &self,
+        options: CreateHiddenRunGroupOptions,
+    ) -> Result<RunGroup, LabkeyError> {
+        validate_create_hidden_run_group_options(&options)?;
+        let timeout = options.timeout;
+        let container_path = options.container_path.clone();
+        let body = build_create_hidden_run_group_body(options.members);
+        let url = self.build_url(
+            "experiment",
+            "createHiddenRunGroup.api",
+            container_path.as_deref(),
+        );
+        self.post_with_options(
+            url,
+            &body,
+            &RequestOptions {
+                timeout,
+                ..RequestOptions::default()
+            },
+        )
+        .await
+    }
+
+    /// Update entity sequence state through `experiment-setEntitySequence.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the request fails or the response cannot be parsed.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::experiment::{EntityKindName, SeqType, SetEntitySequenceOptions};
+    ///
+    /// let _ = client
+    ///     .set_entity_sequence(
+    ///         SetEntitySequenceOptions::builder()
+    ///             .seq_type(SeqType::GenId)
+    ///             .kind_name(EntityKindName::SampleSet)
+    ///             .new_value(100)
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn set_entity_sequence(
+        &self,
+        options: SetEntitySequenceOptions,
+    ) -> Result<EntitySequenceResponse, LabkeyError> {
+        let timeout = options.timeout;
+        let container_path = options.container_path.clone();
+        let body = build_set_entity_sequence_body(&options);
+        let url = self.build_url(
+            "experiment",
+            "setEntitySequence.api",
+            container_path.as_deref(),
+        );
+        self.post_with_options(
+            url,
+            &body,
+            &RequestOptions {
+                timeout,
+                ..RequestOptions::default()
+            },
+        )
+        .await
+    }
+
+    /// Get current entity sequence state through `experiment-getEntitySequence.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the request fails or the response cannot be parsed.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::experiment::{GetEntitySequenceOptions, SeqType};
+    ///
+    /// let _ = client
+    ///     .get_entity_sequence(GetEntitySequenceOptions::builder().seq_type(SeqType::GenId).build())
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_entity_sequence(
+        &self,
+        options: GetEntitySequenceOptions,
+    ) -> Result<EntitySequenceResponse, LabkeyError> {
+        let url = self.build_url(
+            "experiment",
+            "getEntitySequence.api",
+            options.container_path.as_deref(),
+        );
+        let params = build_get_entity_sequence_params(&options);
+        self.get(url, &params).await
     }
 }
 
@@ -670,13 +1794,29 @@ mod tests {
     #[test]
     fn all_experiment_endpoint_urls_match_expected_routes() {
         let client = test_client();
-        let cases = [("lineage", "lineage.api"), ("resolve", "resolve.api")];
+        let cases = [
+            ("lineage", "experiment", "lineage.api"),
+            ("resolve", "experiment", "resolve.api"),
+            ("save_batch", "assay", "saveAssayBatch.api"),
+            ("save_batches", "assay", "saveAssayBatch.api"),
+            ("load_batch", "assay", "getAssayBatch.api"),
+            ("load_batches", "assay", "getAssayBatches.api"),
+            ("load_runs", "assay", "getAssayRuns.api"),
+            ("save_runs", "assay", "saveAssayRuns.api"),
+            (
+                "create_hidden_run_group",
+                "experiment",
+                "createHiddenRunGroup.api",
+            ),
+            ("set_entity_sequence", "experiment", "setEntitySequence.api"),
+            ("get_entity_sequence", "experiment", "getEntitySequence.api"),
+        ];
 
-        for (_label, action) in cases {
-            let url = client.build_url("experiment", action, None);
+        for (_label, controller, action) in cases {
+            let url = client.build_url(controller, action, None);
             assert_eq!(
                 url.as_str(),
-                format!("https://labkey.example.com/labkey/Project/Folder/experiment-{action}")
+                format!("https://labkey.example.com/labkey/Project/Folder/{controller}-{action}")
             );
         }
     }
@@ -816,5 +1956,273 @@ mod tests {
             }
             other => panic!("expected unexpected response error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn run_group_round_trips_serde() {
+        let group_json = serde_json::json!({
+            "name": "batch-1",
+            "batchProtocolId": 7,
+            "hidden": true,
+            "runs": [
+                {
+                    "name": "run-1",
+                    "dataInputs": [],
+                    "dataOutputs": [],
+                    "materialInputs": [],
+                    "materialOutputs": []
+                }
+            ]
+        });
+
+        let group: RunGroup =
+            serde_json::from_value(group_json.clone()).expect("deserialize run group");
+        assert_eq!(group.exp_object.name.as_deref(), Some("batch-1"));
+        assert_eq!(group.batch_protocol_id, Some(7));
+        assert_eq!(group.hidden, Some(true));
+        assert_eq!(group.runs.len(), 1);
+
+        let serialized = serde_json::to_value(&group).expect("serialize run group");
+        assert_eq!(serialized["name"], "batch-1");
+        assert_eq!(serialized["batchProtocolId"], 7);
+    }
+
+    #[test]
+    fn save_batch_body_wraps_single_batch_in_array() {
+        let options = SaveBatchOptions::builder()
+            .assay_id(12)
+            .batch(RunGroup {
+                exp_object: ExpObject {
+                    comment: None,
+                    container: None,
+                    container_path: None,
+                    cpas_type: None,
+                    created: None,
+                    created_by: None,
+                    id: None,
+                    lsid: None,
+                    modified: None,
+                    modified_by: None,
+                    name: Some("batch-one".to_string()),
+                    pk_filters: vec![],
+                    query_name: None,
+                    restricted: None,
+                    schema_name: None,
+                    type_: None,
+                    url: None,
+                    properties: None,
+                },
+                batch_protocol_id: None,
+                hidden: None,
+                runs: vec![],
+            })
+            .build();
+
+        let body = build_save_batch_body(options);
+        let body_json = serde_json::to_value(body).expect("serialize save batch body");
+        assert_eq!(body_json["assayId"], 12);
+        assert!(body_json["batches"].is_array());
+        assert_eq!(
+            body_json["batches"]
+                .as_array()
+                .expect("batches array")
+                .len(),
+            1
+        );
+        assert_eq!(body_json["batches"][0]["name"], "batch-one");
+    }
+
+    #[test]
+    fn batch_and_runs_envelope_extraction_handles_success_and_missing_fields() {
+        let batch_response = serde_json::json!({
+            "batch": {
+                "name": "loaded-batch",
+                "runs": []
+            }
+        });
+        let batches_response = serde_json::json!({
+            "batches": [
+                {
+                    "name": "loaded-batch",
+                    "runs": []
+                }
+            ]
+        });
+        let runs_response = serde_json::json!({
+            "runs": [
+                {
+                    "name": "run-1",
+                    "dataInputs": [],
+                    "dataOutputs": [],
+                    "materialInputs": [],
+                    "materialOutputs": []
+                }
+            ]
+        });
+
+        let batch = extract_batch_response(&batch_response).expect("extract single batch");
+        assert_eq!(batch.exp_object.name.as_deref(), Some("loaded-batch"));
+
+        let batches = extract_batches_response(&batches_response).expect("extract batches");
+        assert_eq!(batches.len(), 1);
+
+        let runs = extract_runs_response(&runs_response).expect("extract runs");
+        assert_eq!(runs.len(), 1);
+
+        let missing_batch = extract_batch_response(&serde_json::json!({"success": true}))
+            .expect_err("missing batch should fail");
+        assert!(matches!(
+            missing_batch,
+            LabkeyError::UnexpectedResponse { .. }
+        ));
+
+        let missing_batches = extract_batches_response(&serde_json::json!({"success": true}))
+            .expect_err("missing batches should fail");
+        assert!(matches!(
+            missing_batches,
+            LabkeyError::UnexpectedResponse { .. }
+        ));
+
+        let missing_runs = extract_runs_response(&serde_json::json!({"success": true}))
+            .expect_err("missing runs should fail");
+        assert!(matches!(
+            missing_runs,
+            LabkeyError::UnexpectedResponse { .. }
+        ));
+
+        let empty_batches = extract_single_batch_response(&serde_json::json!({"batches": []}))
+            .expect_err("empty save_batch envelope should fail");
+        assert!(matches!(
+            empty_batches,
+            LabkeyError::UnexpectedResponse { .. }
+        ));
+
+        let invalid_batch_shape = extract_batch_response(&serde_json::json!({"batch": []}))
+            .expect_err("invalid batch shape should fail");
+        assert!(matches!(
+            invalid_batch_shape,
+            LabkeyError::UnexpectedResponse { .. }
+        ));
+    }
+
+    #[test]
+    fn save_materials_delegates_to_insert_rows_samples_schema() {
+        let options = SaveMaterialsOptions::builder()
+            .name("MySampleSet".to_string())
+            .materials(vec![serde_json::json!({"Name": "M-1"})])
+            .maybe_container_path(Some("/Project/Alt".to_string()))
+            .build();
+
+        let insert_options = save_materials_to_insert_rows_options(options);
+        assert_eq!(insert_options.schema_name, "Samples");
+        assert_eq!(insert_options.query_name, "MySampleSet");
+        assert_eq!(insert_options.rows.len(), 1);
+        assert_eq!(
+            insert_options.container_path.as_deref(),
+            Some("/Project/Alt")
+        );
+    }
+
+    #[test]
+    fn create_hidden_run_group_body_uses_exactly_one_input_mode() {
+        let run_ids =
+            build_create_hidden_run_group_body(HiddenRunGroupMembers::RunIds(vec![1, 2, 3]));
+        let run_ids_json = serde_json::to_value(run_ids).expect("serialize run id body");
+        assert_eq!(run_ids_json["runIds"], serde_json::json!([1, 2, 3]));
+        assert!(run_ids_json.get("selectionKey").is_none());
+
+        let selection = build_create_hidden_run_group_body(HiddenRunGroupMembers::SelectionKey(
+            "selection-1".to_string(),
+        ));
+        let selection_json = serde_json::to_value(selection).expect("serialize selection key body");
+        assert_eq!(selection_json["selectionKey"], "selection-1");
+        assert!(selection_json.get("runIds").is_none());
+    }
+
+    #[test]
+    fn get_entity_sequence_params_include_seq_type_and_optional_fields() {
+        let options = GetEntitySequenceOptions::builder()
+            .seq_type(SeqType::RootSampleCount)
+            .kind_name(EntityKindName::SampleSet)
+            .row_id(77)
+            .build();
+
+        let params = build_get_entity_sequence_params(&options);
+        assert!(params.contains(&("seqType".to_string(), "rootSampleCount".to_string())));
+        assert!(params.contains(&("kindName".to_string(), "SampleSet".to_string())));
+        assert!(params.contains(&("rowId".to_string(), "77".to_string())));
+    }
+
+    #[test]
+    fn set_entity_sequence_body_serializes_seq_type_and_omits_absent_optionals() {
+        let body = build_set_entity_sequence_body(
+            &SetEntitySequenceOptions::builder()
+                .seq_type(SeqType::GenId)
+                .build(),
+        );
+        let body_json = serde_json::to_value(body).expect("serialize set entity sequence body");
+        assert_eq!(body_json["seqType"], "genId");
+        assert!(body_json.get("rowId").is_none());
+        assert!(body_json.get("kindName").is_none());
+        assert!(body_json.get("newValue").is_none());
+    }
+
+    #[test]
+    fn experiment_batch_and_run_validation_rejects_invalid_input() {
+        let hidden_run_ids = validate_create_hidden_run_group_options(
+            &CreateHiddenRunGroupOptions::builder()
+                .members(HiddenRunGroupMembers::RunIds(vec![]))
+                .build(),
+        )
+        .expect_err("empty run ids should fail");
+        assert!(matches!(hidden_run_ids, LabkeyError::InvalidInput(_)));
+
+        let hidden_selection = validate_create_hidden_run_group_options(
+            &CreateHiddenRunGroupOptions::builder()
+                .members(HiddenRunGroupMembers::SelectionKey("   ".to_string()))
+                .build(),
+        )
+        .expect_err("blank selection key should fail");
+        assert!(matches!(hidden_selection, LabkeyError::InvalidInput(_)));
+
+        let save_batches = validate_save_batches_options(
+            &SaveBatchesOptions::builder()
+                .assay_id(1)
+                .batches(vec![])
+                .build(),
+        )
+        .expect_err("empty batches should fail");
+        assert!(matches!(save_batches, LabkeyError::InvalidInput(_)));
+
+        let load_batches = validate_load_batches_options(
+            &LoadBatchesOptions::builder()
+                .batch_ids(vec![])
+                .assay_id(1)
+                .build(),
+        )
+        .expect_err("empty batch ids should fail");
+        assert!(matches!(load_batches, LabkeyError::InvalidInput(_)));
+
+        let save_runs =
+            validate_save_runs_options(&SaveRunsOptions::builder().runs(vec![]).build())
+                .expect_err("empty runs should fail");
+        assert!(matches!(save_runs, LabkeyError::InvalidInput(_)));
+
+        let load_runs = validate_load_runs_options(
+            &LoadRunsOptions::builder()
+                .lsids(vec!["   ".to_string()])
+                .build(),
+        )
+        .expect_err("blank run lsid should fail");
+        assert!(matches!(load_runs, LabkeyError::InvalidInput(_)));
+
+        let save_materials = validate_save_materials_options(
+            &SaveMaterialsOptions::builder()
+                .name("  ".to_string())
+                .materials(vec![])
+                .build(),
+        )
+        .expect_err("blank sample-set name should fail");
+        assert!(matches!(save_materials, LabkeyError::InvalidInput(_)));
     }
 }
