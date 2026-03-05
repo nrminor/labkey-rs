@@ -31,6 +31,8 @@
 !/src/domain.rs
 !/src/experiment.rs
 !/src/filter.rs
+!/src/message.rs
+!/src/participant_group.rs
 !/src/pipeline.rs
 !/src/query.rs
 !/src/report.rs
@@ -43,6 +45,7 @@
 !/src/security/permission.rs
 !/src/security/policy.rs
 !/src/security/session.rs
+!/src/storage.rs
 
 # === Allowed: Tests ===
 !/tests

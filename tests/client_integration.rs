@@ -10,6 +10,8 @@ use labkey_rs::client::__internal_test_support;
 use labkey_rs::common::AuditBehavior;
 use labkey_rs::experiment::{LineageOptions, ResolveOptions};
 use labkey_rs::filter::Filter;
+use labkey_rs::message::{ContentType, MsgContent, Recipient, RecipientType, SendMessageOptions};
+use labkey_rs::participant_group::UpdateParticipantGroupOptions;
 use labkey_rs::pipeline::{
     GetFileStatusOptions, GetPipelineContainerOptions, GetProtocolsOptions, StartAnalysisOptions,
 };
@@ -34,6 +36,9 @@ use labkey_rs::security::{
     GetUserPermissionsOptions, GetUsersOptions, GetUsersWithPermissionsOptions, ImpersonateTarget,
     ImpersonateUserOptions, LogoutOptions, MoveContainerOptions, RemoveGroupMembersOptions,
     RenameGroupOptions, SavePolicyOptions, StopImpersonatingOptions, WhoAmIOptions,
+};
+use labkey_rs::storage::{
+    CreateStorageItemOptions, DeleteStorageItemOptions, StorageType, UpdateStorageItemOptions,
 };
 use url::Url;
 use wiremock::matchers::{
@@ -3918,4 +3923,408 @@ async fn report_validation_rejects_blank_required_fields() {
         .await
         .expect_err("execute_function should reject blank function_name");
     assert!(matches!(function_err, LabkeyError::InvalidInput(_)));
+}
+
+#[tokio::test]
+async fn send_message_posts_expected_json_body() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/announcements-sendMessage.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "msgFrom": "sender@example.com",
+            "msgSubject": "Status",
+            "msgRecipients": [
+                {"type": "TO", "address": "team@example.com"},
+                {"type": "CC", "principalId": 123}
+            ],
+            "msgContent": [
+                {"type": "text/plain", "content": "All good"}
+            ]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true,
+            "message": "sent"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .send_message(
+            SendMessageOptions::builder()
+                .msg_from("sender@example.com".to_string())
+                .msg_subject("Status".to_string())
+                .msg_recipients(vec![
+                    Recipient::address(RecipientType::To, "team@example.com"),
+                    Recipient::principal_id(RecipientType::Cc, 123),
+                ])
+                .msg_content(vec![MsgContent::new("All good", ContentType::TextPlain)])
+                .build(),
+        )
+        .await
+        .expect("send_message should succeed");
+
+    assert_eq!(response.success, Some(true));
+}
+
+#[tokio::test]
+async fn send_message_honors_container_path_override() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Messages/announcements-sendMessage.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "msgSubject": "Override"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .send_message(
+            SendMessageOptions::builder()
+                .msg_subject("Override".to_string())
+                .container_path("/Alt/Messages".to_string())
+                .build(),
+        )
+        .await
+        .expect("send_message should honor container override");
+
+    assert_eq!(response.success, Some(true));
+}
+
+#[tokio::test]
+async fn send_message_json_error_maps_to_api_error() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/announcements-sendMessage.api"))
+        .respond_with(
+            ResponseTemplate::new(400)
+                .set_body_json(fixture::<serde_json::Value>("api_error.json")),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let error = client
+        .send_message(SendMessageOptions::builder().build())
+        .await
+        .expect_err("send_message should map JSON error to Api");
+
+    assert!(matches!(error, LabkeyError::Api { .. }));
+}
+
+#[tokio::test]
+async fn storage_endpoints_use_expected_routes_and_body_shapes() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/storage-create.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "type": "Physical Location",
+            "props": {"name": "Main Campus"}
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true,
+            "data": {"rowId": 11}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/storage-update.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "type": "Storage Unit Type",
+            "props": {"rowId": 7, "rows": 10, "cols": 10}
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/storage-delete.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "type": "Freezer",
+            "props": {"rowId": 9}
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+
+    let create = client
+        .create_storage_item(
+            CreateStorageItemOptions::builder()
+                .storage_type(StorageType::PhysicalLocation)
+                .props(serde_json::json!({"name": "Main Campus"}))
+                .build(),
+        )
+        .await
+        .expect("create_storage_item should succeed");
+    assert!(create.success);
+
+    let update = client
+        .update_storage_item(
+            UpdateStorageItemOptions::builder()
+                .storage_type(StorageType::StorageUnitType)
+                .props(serde_json::json!({"rowId": 7, "rows": 10, "cols": 10}))
+                .build(),
+        )
+        .await
+        .expect("update_storage_item should succeed");
+    assert!(update.success);
+
+    let delete = client
+        .delete_storage_item(
+            DeleteStorageItemOptions::builder()
+                .storage_type(StorageType::Freezer)
+                .row_id(9)
+                .build(),
+        )
+        .await
+        .expect("delete_storage_item should succeed");
+    assert!(delete.success);
+}
+
+#[tokio::test]
+async fn storage_endpoints_honor_container_path_override() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Storage/storage-create.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "type": "Freezer",
+            "props": {"name": "F1"}
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Storage/storage-update.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "type": "Freezer",
+            "props": {"rowId": 1, "name": "F2"}
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Storage/storage-delete.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "type": "Freezer",
+            "props": {"rowId": 1}
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+
+    client
+        .create_storage_item(
+            CreateStorageItemOptions::builder()
+                .storage_type(StorageType::Freezer)
+                .props(serde_json::json!({"name": "F1"}))
+                .container_path("/Alt/Storage".to_string())
+                .build(),
+        )
+        .await
+        .expect("create_storage_item should honor container override");
+
+    client
+        .update_storage_item(
+            UpdateStorageItemOptions::builder()
+                .storage_type(StorageType::Freezer)
+                .props(serde_json::json!({"rowId": 1, "name": "F2"}))
+                .container_path("/Alt/Storage".to_string())
+                .build(),
+        )
+        .await
+        .expect("update_storage_item should honor container override");
+
+    client
+        .delete_storage_item(
+            DeleteStorageItemOptions::builder()
+                .storage_type(StorageType::Freezer)
+                .row_id(1)
+                .container_path("/Alt/Storage".to_string())
+                .build(),
+        )
+        .await
+        .expect("delete_storage_item should honor container override");
+}
+
+#[tokio::test]
+async fn create_storage_item_non_json_error_maps_to_unexpected_response() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/storage-create.api"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("not-json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let error = client
+        .create_storage_item(
+            CreateStorageItemOptions::builder()
+                .storage_type(StorageType::Freezer)
+                .props(serde_json::json!({"name": "F1"}))
+                .build(),
+        )
+        .await
+        .expect_err("create_storage_item should map non-json error to UnexpectedResponse");
+
+    assert!(matches!(error, LabkeyError::UnexpectedResponse { .. }));
+}
+
+#[tokio::test]
+async fn update_participant_group_extracts_group_envelope() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/MyProject/MyFolder/participant-group-updateParticipantGroup.api",
+        ))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "rowId": 101,
+            "label": "Responders",
+            "description": "High neutralizers",
+            "participantIds": ["PT-1", "PT-2"],
+            "ensureParticipantIds": ["PT-3"],
+            "deleteParticipantIds": ["PT-4"],
+            "filters": [{"fieldKey": "Visit", "op": "eq", "value": 1}]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "group": {
+                "rowId": 101,
+                "label": "Responders"
+            }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let group = client
+        .update_participant_group(
+            UpdateParticipantGroupOptions::builder()
+                .row_id(101)
+                .label("Responders".to_string())
+                .description("High neutralizers".to_string())
+                .participant_ids(vec!["PT-1".to_string(), "PT-2".to_string()])
+                .ensure_participant_ids(vec!["PT-3".to_string()])
+                .delete_participant_ids(vec!["PT-4".to_string()])
+                .filters(serde_json::json!([
+                    {"fieldKey": "Visit", "op": "eq", "value": 1}
+                ]))
+                .build(),
+        )
+        .await
+        .expect("update_participant_group should succeed");
+
+    assert_eq!(group["rowId"], serde_json::json!(101));
+}
+
+#[tokio::test]
+async fn update_participant_group_honors_container_path_override() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/Alt/Study/participant-group-updateParticipantGroup.api",
+        ))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "rowId": 101
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "group": { "rowId": 101 }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .update_participant_group(
+            UpdateParticipantGroupOptions::builder()
+                .row_id(101)
+                .container_path("/Alt/Study".to_string())
+                .build(),
+        )
+        .await
+        .expect("update_participant_group should honor container override");
+
+    assert_eq!(response["rowId"], serde_json::json!(101));
+}
+
+#[tokio::test]
+async fn update_participant_group_errors_when_group_envelope_missing() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/MyProject/MyFolder/participant-group-updateParticipantGroup.api",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let error = client
+        .update_participant_group(UpdateParticipantGroupOptions::builder().row_id(101).build())
+        .await
+        .expect_err("missing group envelope should fail");
+    assert!(matches!(error, LabkeyError::UnexpectedResponse { .. }));
 }

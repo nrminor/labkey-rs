@@ -30,10 +30,13 @@ pub mod domain;
 pub mod error;
 pub mod experiment;
 pub mod filter;
+pub mod message;
+pub mod participant_group;
 pub mod pipeline;
 pub mod query;
 pub mod report;
 pub mod security;
+pub mod storage;
 
 pub use client::{ClientConfig, Credential, LabkeyClient};
 pub use error::LabkeyError;
