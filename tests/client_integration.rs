@@ -18,7 +18,10 @@ use labkey_rs::query::{
     SelectRowsOptions, TruncateTableOptions, UpdateRowsOptions, ValidateQueryOptions,
 };
 use labkey_rs::security::{
-    GetFolderTypesOptions, GetModulesOptions, GetReadableContainersOptions, MoveContainerOptions,
+    AddGroupMembersOptions, CreateGroupOptions, CreateNewUserOptions, DeleteGroupOptions,
+    EnsureLoginOptions, GetFolderTypesOptions, GetGroupsForCurrentUserOptions, GetModulesOptions,
+    GetReadableContainersOptions, GetUsersOptions, GetUsersWithPermissionsOptions,
+    MoveContainerOptions, RemoveGroupMembersOptions, RenameGroupOptions,
 };
 use url::Url;
 use wiremock::matchers::{
@@ -2216,4 +2219,409 @@ async fn move_container_rejects_mismatched_container_path_override() {
         }
         other => panic!("expected LabkeyError::InvalidInput, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn create_new_user_posts_expected_body_and_deserializes_response() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/security-createNewUser.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "email": "analyst@example.com",
+            "sendEmail": true,
+            "optionalMessage": "Welcome"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true,
+            "htmlErrors": [],
+            "users": [{
+                "email": "analyst@example.com",
+                "isNew": true,
+                "message": "created",
+                "userId": 410
+            }]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .create_new_user(
+            CreateNewUserOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .email("analyst@example.com".to_string())
+                .send_email(true)
+                .optional_message("Welcome".to_string())
+                .build(),
+        )
+        .await
+        .expect("create new user should succeed");
+
+    assert!(response.success);
+    assert_eq!(response.users.len(), 1);
+    assert_eq!(response.users[0].user_id, 410);
+}
+
+#[tokio::test]
+async fn ensure_login_gets_expected_endpoint_and_deserializes_current_user() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/security-ensureLogin.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "currentUser": {
+                "userId": 7,
+                "email": "owner@example.com"
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .ensure_login(
+            EnsureLoginOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .build(),
+        )
+        .await
+        .expect("ensure login should succeed");
+
+    assert_eq!(response.current_user.user_id, 7);
+}
+
+#[tokio::test]
+async fn get_users_sends_expected_params() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/user-getUsers.api"))
+        .and(query_param("groupId", "17"))
+        .and(query_param("name", "ana"))
+        .and(query_param("allMembers", "true"))
+        .and(query_param("active", "false"))
+        .and(query_param("permissions", "ReadPermission"))
+        .and(query_param("permissions", "InsertPermission"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "container": "/Alt/Container",
+            "users": [{"userId": 10}]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let users = client
+        .get_users(
+            GetUsersOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .group_id(17)
+                .name("ana".to_string())
+                .all_members(true)
+                .active(false)
+                .permissions(vec![
+                    "ReadPermission".to_string(),
+                    "InsertPermission".to_string(),
+                ])
+                .build(),
+        )
+        .await
+        .expect("get users should succeed");
+    assert_eq!(users.users.len(), 1);
+}
+
+#[tokio::test]
+async fn get_users_with_permissions_sends_expected_params() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/user-getUsersWithPermissions.api"))
+        .and(query_param("group", "Researchers"))
+        .and(query_param("includeInactive", "true"))
+        .and(query_param("apiVersion", "23.11"))
+        .and(query_param("permissions", "ReadPermission"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "users": [{"userId": 11}]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+
+    let with_permissions = client
+        .get_users_with_permissions(
+            GetUsersWithPermissionsOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .permissions(vec!["ReadPermission".to_string()])
+                .group("Researchers".to_string())
+                .include_inactive(true)
+                .required_version("23.11".to_string())
+                .build(),
+        )
+        .await
+        .expect("get users with permissions should succeed");
+    assert_eq!(with_permissions.users.len(), 1);
+}
+
+#[tokio::test]
+async fn get_users_with_permissions_rejects_empty_permissions() {
+    let client = test_client("https://labkey.example.com");
+
+    let result = client
+        .get_users_with_permissions(
+            GetUsersWithPermissionsOptions::builder()
+                .permissions(Vec::new())
+                .build(),
+        )
+        .await;
+
+    match result {
+        Err(LabkeyError::InvalidInput(message)) => {
+            assert_eq!(
+                message,
+                "get_users_with_permissions requires at least one permission"
+            );
+        }
+        other => panic!("expected LabkeyError::InvalidInput, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn group_create_and_membership_endpoints_send_expected_request_shapes() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/security-createGroup.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "name": "Research Analysts"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 101,
+            "name": "Research Analysts"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/security-addGroupMember.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "groupId": 101,
+            "principalIds": [201, 202]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "added": [201, 202]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/security-removeGroupMember.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "groupId": 101,
+            "principalIds": [201]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "removed": [201]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+
+    let created = client
+        .create_group(
+            CreateGroupOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .group_name("Research Analysts".to_string())
+                .build(),
+        )
+        .await
+        .expect("create group should succeed");
+    assert_eq!(created.id, 101);
+
+    let added = client
+        .add_group_members(
+            AddGroupMembersOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .group_id(101)
+                .principal_ids(vec![201, 202])
+                .build(),
+        )
+        .await
+        .expect("add group members should succeed");
+    assert_eq!(added.added, vec![201, 202]);
+
+    let removed = client
+        .remove_group_members(
+            RemoveGroupMembersOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .group_id(101)
+                .principal_ids(vec![201])
+                .build(),
+        )
+        .await
+        .expect("remove group members should succeed");
+    assert_eq!(removed.removed, vec![201]);
+}
+
+#[tokio::test]
+async fn add_group_members_rejects_empty_principal_ids() {
+    let client = test_client("https://labkey.example.com");
+
+    let result = client
+        .add_group_members(
+            AddGroupMembersOptions::builder()
+                .group_id(101)
+                .principal_ids(Vec::new())
+                .build(),
+        )
+        .await;
+
+    match result {
+        Err(LabkeyError::InvalidInput(message)) => {
+            assert_eq!(
+                message,
+                "add_group_members requires at least one principal id"
+            );
+        }
+        other => panic!("expected LabkeyError::InvalidInput, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn remove_group_members_rejects_empty_principal_ids() {
+    let client = test_client("https://labkey.example.com");
+
+    let result = client
+        .remove_group_members(
+            RemoveGroupMembersOptions::builder()
+                .group_id(101)
+                .principal_ids(Vec::new())
+                .build(),
+        )
+        .await;
+
+    match result {
+        Err(LabkeyError::InvalidInput(message)) => {
+            assert_eq!(
+                message,
+                "remove_group_members requires at least one principal id"
+            );
+        }
+        other => panic!("expected LabkeyError::InvalidInput, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn group_rename_and_delete_endpoints_send_expected_request_shapes() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/security-renameGroup.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "id": 101,
+            "newName": "Senior Analysts"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "newName": "Senior Analysts",
+            "oldName": "Research Analysts",
+            "renamed": 101,
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/security-deleteGroup.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "id": 101
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "deleted": 1
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+
+    let renamed = client
+        .rename_group(
+            RenameGroupOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .group_id(101)
+                .new_name("Senior Analysts".to_string())
+                .build(),
+        )
+        .await
+        .expect("rename group should succeed");
+    assert!(renamed.success);
+
+    let deleted = client
+        .delete_group(
+            DeleteGroupOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .group_id(101)
+                .build(),
+        )
+        .await
+        .expect("delete group should succeed");
+    assert_eq!(deleted.deleted, 1);
+}
+
+#[tokio::test]
+async fn get_groups_for_current_user_gets_expected_response_shape() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/security-getGroupsForCurrentUser.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "groups": [{
+                "id": 101,
+                "name": "Senior Analysts",
+                "isProjectGroup": true,
+                "isSystemGroup": false
+            }]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let groups = client
+        .get_groups_for_current_user(
+            GetGroupsForCurrentUserOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .build(),
+        )
+        .await
+        .expect("get groups for current user should succeed");
+    assert_eq!(groups.groups.len(), 1);
+    assert_eq!(groups.groups[0].name, "Senior Analysts");
 }

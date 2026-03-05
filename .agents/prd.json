@@ -310,8 +310,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 16,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented US-016 by adding src/security/user.rs and src/security/group.rs, wiring both modules through src/security/mod.rs, and exporting all new option/response types. Added LabkeyClient methods create_new_user, ensure_login, get_users, get_users_with_permissions, create_group, delete_group, rename_group, add_group_members, remove_group_members, and get_groups_for_current_user with controller/action routes matching upstream JS contracts. Modeled all new options with bon builders and optional container_path overrides, and added typed request bodies for all POST endpoints (including create_group name wire key and add/remove_group_members groupId/principalIds keys) without json! in library code. Added typed user/group responses including CreatedUser and CreateNewUserResponse nested users modeling, plus GetUsersResponse happy/minimal deserialization coverage. Incorporated review feedback by hardening input validation with LabkeyError::InvalidInput for empty email, empty/blank permissions, empty principal_ids, and blank group names, and by changing get_users_with_permissions required_version from f64 to string to preserve wire-format fidelity (e.g., 23.11). Expanded unit tests for endpoint URL construction, request-body wire keys, response deserialization, and validation error messages, and expanded integration tests for user/group request contracts and invalid-input behavior. Updated .gitignore allow list for src/security/user.rs and src/security/group.rs, solicited feedback from nick-isms/testing-guru/semver-nag, applied follow-up fixes, and verified quality gates with just check before and after feedback changes."
     },
     {
       "id": "US-017",

@@ -33,6 +33,8 @@
 !/src/security/mod.rs
 !/src/security/types.rs
 !/src/security/container.rs
+!/src/security/user.rs
+!/src/security/group.rs
 
 # === Allowed: Tests ===
 !/tests
