@@ -23,6 +23,7 @@
 //! let client = LabkeyClient::new(config).expect("valid configuration");
 //! ```
 
+pub mod assay;
 pub mod client;
 pub mod common;
 pub mod domain;

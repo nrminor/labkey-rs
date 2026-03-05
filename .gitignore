@@ -26,6 +26,7 @@
 !/src/lib.rs
 !/src/error.rs
 !/src/client.rs
+!/src/assay.rs
 !/src/common.rs
 !/src/domain.rs
 !/src/experiment.rs

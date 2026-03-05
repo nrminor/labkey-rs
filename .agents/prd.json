@@ -458,8 +458,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 23,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented US-023 by adding src/assay.rs and exporting pub mod assay from src/lib.rs, plus allow-listing src/assay.rs in .gitignore. Added typed assay API surface for the requested JS endpoints with exact routes/methods: get_assays (POST assay-assayList.api), get_nab_runs (GET nabassay-getNabRuns.api), get_study_nab_graph_url (GET nabassay-getStudyNabGraphURL.api), and get_study_nab_runs (GET nabassay-getStudyNabRuns.api). Added non-exhaustive AssayDesign response modeling with camelCase serde, non-exhaustive C-like AssayLink and FitType enums with explicit serde wire mappings, and bon-builder option structs with optional container_path for each endpoint. Implemented typed get_assays request body shaping with a required top-level parameters wrapper and get_nab_runs query shaping with query.sort/query.offset/query.maxRows/query.showRows semantics plus filter encoding via existing encode_filters. Added client-side InvalidInput validation for blank assay_name and empty/blank object_ids on NAb study/run APIs. Expanded inline tests for all required acceptance coverage: AssayDesign deserialization (happy + minimal defaults), get_assays parameters wrapper and omission behavior, get_nab_runs query-prefix/filter encoding and maxRows/showRows branches, exact enum wire serialization assertions, full enum serde round-trips, variant-count regressions, validation failures, and URL construction for all four endpoints. Solicited feedback from nick-isms/testing-guru/semver-nag, incorporated semver and test-rigor follow-ups, and verified all quality gates with just check before and after feedback changes." 
     },
     {
       "id": "US-024",
