@@ -38,6 +38,7 @@ pub mod report;
 pub mod security;
 pub mod specimen;
 pub mod storage;
+pub mod visualization;
 
 pub use client::{ClientConfig, Credential, LabkeyClient};
 pub use error::LabkeyError;

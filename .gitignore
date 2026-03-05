@@ -47,6 +47,7 @@
 !/src/security/session.rs
 !/src/specimen.rs
 !/src/storage.rs
+!/src/visualization.rs
 
 # === Allowed: Tests ===
 !/tests
