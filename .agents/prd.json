@@ -370,8 +370,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 19,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed focused security parity audit against upstream JS (`src/labkey/Security.ts` and `src/labkey/security/*`) plus Java remote API security commands (`src/org/labkey/remoteapi/security/*`). Endpoint checklist (Rust status): match = create_container, delete_container, rename_container, get_containers, get_folder_types, get_modules, get_readable_containers, move_container, create_new_user, ensure_login, get_users, get_users_with_permissions, create_group, delete_group, rename_group, add_group_members, remove_group_members, get_groups_for_current_user, get_group_permissions, get_user_permissions, get_roles, get_securable_resources, get_policy, save_policy, delete_policy, logout, who_am_i, delete_user, impersonate_user, stop_impersonating; mismatch (implemented but behavior differs) = move_container default addAlias handling was mismatched and is now fixed to always emit addAlias with default true when unset to match JS `config.addAlias !== false`; mismatch/deferred = move_container currently rejects mismatched container_path vs container (Rust strict validation) whereas upstream JS tolerates broader inputs via `container || containerPath`; not implemented/deferred JS helpers = get_schema_permissions, get_role, has_effective_permission, has_permission, get_home_container, get_shared_container, exported security constants; not implemented/deferred Java-only commands = CreateFolder/CreateProject command wrappers and Java command-class-specific convenience response wrappers not exposed in Rust. More than five discrepancies were found and documented; code changes were limited to the highest-risk wire-contract fix (move_container addAlias default semantics), with targeted unit/integration regressions added for default-true and explicit-false request behavior. Verified all gates with just check before and after review feedback integration and after implementing reviewer-suggested coverage improvements." 
     },
     {
       "id": "US-020",

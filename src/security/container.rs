@@ -140,7 +140,8 @@ pub struct MoveContainerOptions {
     pub container: String,
     /// Destination parent path or id.
     pub parent: String,
-    /// Whether to add an alias from the old path.
+    /// Whether to add an alias from the old path. Defaults to `true` when unset,
+    /// matching upstream client behavior.
     pub add_alias: Option<bool>,
 }
 
@@ -196,8 +197,7 @@ struct EmptyPostBody {}
 struct MoveContainerBody {
     container: String,
     parent: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    add_alias: Option<bool>,
+    add_alias: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -724,7 +724,7 @@ impl LabkeyClient {
         let body = MoveContainerBody {
             container: options.container,
             parent: options.parent,
-            add_alias: options.add_alias,
+            add_alias: options.add_alias.unwrap_or(true),
         };
         self.post(url, &body).await
     }
@@ -842,7 +842,7 @@ mod tests {
         let body = MoveContainerBody {
             container: "/Home/Source".to_string(),
             parent: "/Home/Target".to_string(),
-            add_alias: Some(false),
+            add_alias: false,
         };
 
         let value = serde_json::to_value(body).expect("should serialize");
@@ -855,6 +855,18 @@ mod tests {
             Some(&serde_json::json!("/Home/Target"))
         );
         assert_eq!(value.get("addAlias"), Some(&serde_json::json!(false)));
+    }
+
+    #[test]
+    fn move_container_body_serializes_add_alias_true() {
+        let body = MoveContainerBody {
+            container: "/Home/Source".to_string(),
+            parent: "/Home/Target".to_string(),
+            add_alias: true,
+        };
+
+        let value = serde_json::to_value(body).expect("should serialize");
+        assert_eq!(value.get("addAlias"), Some(&serde_json::json!(true)));
     }
 
     #[test]

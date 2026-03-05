@@ -2159,10 +2159,27 @@ async fn move_container_posts_expected_body_and_url_contracts() {
         .and(basic_auth("apikey", "test-api-key"))
         .and(body_json(serde_json::json!({
             "container": "/Alt/Container",
-            "parent": "/Target/Parent"
+            "parent": "/Target/Parent",
+            "addAlias": true
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "success": false
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/Explicit/NoAlias/core-moveContainer.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "container": "/Explicit/NoAlias",
+            "parent": "/Target/Parent",
+            "addAlias": false
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
         })))
         .expect(1)
         .mount(&server)
@@ -2197,6 +2214,18 @@ async fn move_container_posts_expected_body_and_url_contracts() {
         .await
         .expect("move container with override should succeed");
     assert_eq!(second.success, Some(false));
+
+    let third = client
+        .move_container(
+            MoveContainerOptions::builder()
+                .container("/Explicit/NoAlias".to_string())
+                .parent("/Target/Parent".to_string())
+                .add_alias(false)
+                .build(),
+        )
+        .await
+        .expect("move container with add_alias false should succeed");
+    assert_eq!(third.success, Some(true));
 }
 
 #[tokio::test]
