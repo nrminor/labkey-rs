@@ -45,6 +45,7 @@
 !/src/security/permission.rs
 !/src/security/policy.rs
 !/src/security/session.rs
+!/src/specimen.rs
 !/src/storage.rs
 
 # === Allowed: Tests ===

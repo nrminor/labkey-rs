@@ -36,6 +36,7 @@ pub mod pipeline;
 pub mod query;
 pub mod report;
 pub mod security;
+pub mod specimen;
 pub mod storage;
 
 pub use client::{ClientConfig, Credential, LabkeyClient};

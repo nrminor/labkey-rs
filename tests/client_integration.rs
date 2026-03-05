@@ -37,6 +37,12 @@ use labkey_rs::security::{
     ImpersonateUserOptions, LogoutOptions, MoveContainerOptions, RemoveGroupMembersOptions,
     RenameGroupOptions, SavePolicyOptions, StopImpersonatingOptions, WhoAmIOptions,
 };
+use labkey_rs::specimen::{
+    AddSpecimensToRequestOptions, AddVialsToRequestOptions, CancelRequestOptions,
+    GetOpenRequestsOptions, GetProvidingLocationsOptions, GetRepositoriesOptions,
+    GetRequestOptions, GetSpecimenWebPartGroupsOptions, GetVialTypeSummaryOptions,
+    GetVialsByRowIdOptions, RemoveVialsFromRequestOptions, VialId,
+};
 use labkey_rs::storage::{
     CreateStorageItemOptions, DeleteStorageItemOptions, StorageType, UpdateStorageItemOptions,
 };
@@ -4327,4 +4333,447 @@ async fn update_participant_group_errors_when_group_envelope_missing() {
         .await
         .expect_err("missing group envelope should fail");
     assert!(matches!(error, LabkeyError::UnexpectedResponse { .. }));
+}
+
+#[tokio::test]
+async fn specimen_mutation_endpoints_use_expected_body_contracts() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/MyProject/MyFolder/specimen-api-addSpecimensToRequest.api",
+        ))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "preferredLocation": 11,
+            "requestId": 101,
+            "specimenHashes": ["hash-1", "hash-2"]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/specimen-api-getVialsByRowId.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "rowIds": [1, 2]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "vials": [{"rowId": 1}, {"rowId": 2}]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+
+    let add_response = client
+        .add_specimens_to_request(
+            AddSpecimensToRequestOptions::builder()
+                .preferred_location(11)
+                .request_id(101)
+                .specimen_hashes(vec!["hash-1".to_string(), "hash-2".to_string()])
+                .build(),
+        )
+        .await
+        .expect("add_specimens_to_request should succeed");
+    assert_eq!(add_response["success"], serde_json::json!(true));
+
+    let vials = client
+        .get_vials_by_row_id(
+            GetVialsByRowIdOptions::builder()
+                .row_ids(vec![1, 2])
+                .build(),
+        )
+        .await
+        .expect("get_vials_by_row_id should succeed");
+    assert_eq!(vials, serde_json::json!([{"rowId": 1}, {"rowId": 2}]));
+}
+
+#[tokio::test]
+async fn specimen_get_repositories_and_web_part_groups_post_without_body() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/specimen-api-getRepositories.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_string(""))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "repositories": [{"name": "Repo A"}]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/MyProject/MyFolder/specimen-api-getSpecimenWebPartGroups.api",
+        ))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_string(""))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true,
+            "groups": []
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+
+    let repositories = client
+        .get_repositories(GetRepositoriesOptions::builder().build())
+        .await
+        .expect("get_repositories should succeed");
+    assert_eq!(repositories, serde_json::json!([{"name": "Repo A"}]));
+
+    let groups = client
+        .get_specimen_web_part_groups(GetSpecimenWebPartGroupsOptions::builder().build())
+        .await
+        .expect("get_specimen_web_part_groups should succeed");
+    assert_eq!(groups["success"], serde_json::json!(true));
+}
+
+#[tokio::test]
+async fn specimen_remove_vials_endpoint_uses_no_api_suffix_and_default_id_type() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/MyProject/MyFolder/specimen-api-removeVialsFromRequest",
+        ))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "idType": "GlobalUniqueId",
+            "requestId": 101,
+            "vialIds": ["VIAL-1", "VIAL-2"]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .remove_vials_from_request(
+            RemoveVialsFromRequestOptions::builder()
+                .request_id(101)
+                .vial_ids(vec![VialId::text("VIAL-1"), VialId::text("VIAL-2")])
+                .build(),
+        )
+        .await
+        .expect("remove_vials_from_request should succeed");
+
+    assert_eq!(response["success"], serde_json::json!(true));
+}
+
+#[tokio::test]
+async fn specimen_get_open_requests_extracts_requests_envelope_and_errors_when_missing() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/specimen-api-getOpenRequests.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "allUsers": true
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "requests": [{"requestId": 101}]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Specimen/specimen-api-getOpenRequests.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+
+    let requests = client
+        .get_open_requests(GetOpenRequestsOptions::builder().all_users(true).build())
+        .await
+        .expect("get_open_requests should unwrap requests envelope");
+    assert_eq!(requests, serde_json::json!([{"requestId": 101}]));
+
+    let error = client
+        .get_open_requests(
+            GetOpenRequestsOptions::builder()
+                .container_path("/Alt/Specimen".to_string())
+                .build(),
+        )
+        .await
+        .expect_err("missing requests envelope should fail");
+    match error {
+        LabkeyError::UnexpectedResponse { text, .. } => {
+            assert!(text.contains("get_open_requests"));
+            assert!(text.contains("requests"));
+        }
+        other => panic!("unexpected error variant: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn specimen_add_vials_and_cancel_request_use_expected_contracts() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/MyProject/MyFolder/specimen-api-addVialsToRequest.api",
+        ))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "idType": "GlobalUniqueId",
+            "requestId": 101,
+            "vialIds": ["VIAL-1"]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/specimen-api-cancelRequest.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "requestId": 101
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+
+    let add_vials_response = client
+        .add_vials_to_request(
+            AddVialsToRequestOptions::builder()
+                .request_id(101)
+                .vial_ids(vec![VialId::text("VIAL-1")])
+                .build(),
+        )
+        .await
+        .expect("add_vials_to_request should succeed");
+    assert_eq!(add_vials_response["success"], serde_json::json!(true));
+
+    let cancel_response = client
+        .cancel_request(CancelRequestOptions::builder().request_id(101).build())
+        .await
+        .expect("cancel_request should succeed");
+    assert_eq!(cancel_response["success"], serde_json::json!(true));
+}
+
+#[tokio::test]
+async fn specimen_get_providing_request_and_summary_use_expected_contracts() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/MyProject/MyFolder/specimen-api-getProvidingLocations.api",
+        ))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "specimenHashes": ["hash-1"]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "locations": [{"name": "Repo A"}]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Specimen/specimen-api-getRequest.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "requestId": 101
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "request": {"requestId": 101}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/MyProject/MyFolder/specimen-api-getVialTypeSummary.api",
+        ))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_string(""))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true,
+            "summary": []
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+
+    let locations = client
+        .get_providing_locations(
+            GetProvidingLocationsOptions::builder()
+                .specimen_hashes(vec!["hash-1".to_string()])
+                .build(),
+        )
+        .await
+        .expect("get_providing_locations should succeed");
+    assert_eq!(locations, serde_json::json!([{"name": "Repo A"}]));
+
+    let request = client
+        .get_request(
+            GetRequestOptions::builder()
+                .request_id(101)
+                .container_path("/Alt/Specimen".to_string())
+                .build(),
+        )
+        .await
+        .expect("get_request should honor container override");
+    assert_eq!(request["requestId"], serde_json::json!(101));
+
+    let summary = client
+        .get_vial_type_summary(GetVialTypeSummaryOptions::builder().build())
+        .await
+        .expect("get_vial_type_summary should succeed");
+    assert_eq!(summary["success"], serde_json::json!(true));
+}
+
+#[tokio::test]
+async fn specimen_missing_envelopes_map_to_unexpected_response_with_context() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Missing/specimen-api-getProvidingLocations.api"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Missing/specimen-api-getRepositories.api"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Missing/specimen-api-getRequest.api"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Missing/specimen-api-getVialsByRowId.api"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+
+    let locations_error = client
+        .get_providing_locations(
+            GetProvidingLocationsOptions::builder()
+                .specimen_hashes(vec!["hash-1".to_string()])
+                .container_path("/Alt/Missing".to_string())
+                .build(),
+        )
+        .await
+        .expect_err("missing locations envelope should fail");
+    match locations_error {
+        LabkeyError::UnexpectedResponse { text, .. } => {
+            assert!(text.contains("get_providing_locations"));
+            assert!(text.contains("locations"));
+        }
+        other => panic!("unexpected error variant: {other:?}"),
+    }
+
+    let repositories_error = client
+        .get_repositories(
+            GetRepositoriesOptions::builder()
+                .container_path("/Alt/Missing".to_string())
+                .build(),
+        )
+        .await
+        .expect_err("missing repositories envelope should fail");
+    match repositories_error {
+        LabkeyError::UnexpectedResponse { text, .. } => {
+            assert!(text.contains("get_repositories"));
+            assert!(text.contains("repositories"));
+        }
+        other => panic!("unexpected error variant: {other:?}"),
+    }
+
+    let request_error = client
+        .get_request(
+            GetRequestOptions::builder()
+                .request_id(101)
+                .container_path("/Alt/Missing".to_string())
+                .build(),
+        )
+        .await
+        .expect_err("missing request envelope should fail");
+    match request_error {
+        LabkeyError::UnexpectedResponse { text, .. } => {
+            assert!(text.contains("get_request"));
+            assert!(text.contains("request"));
+        }
+        other => panic!("unexpected error variant: {other:?}"),
+    }
+
+    let vials_error = client
+        .get_vials_by_row_id(
+            GetVialsByRowIdOptions::builder()
+                .row_ids(vec![1])
+                .container_path("/Alt/Missing".to_string())
+                .build(),
+        )
+        .await
+        .expect_err("missing vials envelope should fail");
+    match vials_error {
+        LabkeyError::UnexpectedResponse { text, .. } => {
+            assert!(text.contains("get_vials_by_row_id"));
+            assert!(text.contains("vials"));
+        }
+        other => panic!("unexpected error variant: {other:?}"),
+    }
 }
