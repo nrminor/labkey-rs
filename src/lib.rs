@@ -26,10 +26,12 @@
 pub mod assay;
 pub mod client;
 pub mod common;
+pub mod di;
 pub mod domain;
 pub mod error;
 pub mod experiment;
 pub mod filter;
+pub mod list;
 pub mod message;
 pub mod participant_group;
 pub mod pipeline;

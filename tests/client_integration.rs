@@ -8,8 +8,13 @@ use labkey_rs::assay::{ImportRunOptions, ImportRunSource};
 #[cfg(feature = "internal-test-support")]
 use labkey_rs::client::__internal_test_support;
 use labkey_rs::common::AuditBehavior;
+use labkey_rs::di::{
+    ResetTransformStateOptions, RunTransformOptions, TransformConfig, TransformSelector,
+    UpdateTransformConfigurationOptions,
+};
 use labkey_rs::experiment::{LineageOptions, ResolveOptions};
 use labkey_rs::filter::Filter;
+use labkey_rs::list::{CreateListOptions, ListKeyType};
 use labkey_rs::message::{ContentType, MsgContent, Recipient, RecipientType, SendMessageOptions};
 use labkey_rs::participant_group::UpdateParticipantGroupOptions;
 use labkey_rs::pipeline::{
@@ -119,6 +124,160 @@ async fn resolve_sends_repeated_lsids_query_params() {
         .expect("resolve request should succeed");
 
     assert!(response.data.is_empty());
+}
+
+#[tokio::test]
+async fn run_transform_posts_expected_no_suffix_route_and_body_shape() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/dataintegration-runTransform"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "transformName": "LoadFromStaging"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true,
+            "jobId": 9
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .run_transform(
+            RunTransformOptions::builder()
+                .selector(TransformSelector::Name("LoadFromStaging".to_string()))
+                .build(),
+        )
+        .await
+        .expect("run_transform should succeed");
+
+    assert_eq!(response.success, Some(true));
+    assert_eq!(response.job_id, Some(9));
+}
+
+#[tokio::test]
+async fn reset_transform_state_posts_expected_no_suffix_route_and_body_shape() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/MyProject/MyFolder/dataintegration-resetTransformState",
+        ))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "transformId": 42
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true,
+            "message": "reset"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .reset_transform_state(
+            ResetTransformStateOptions::builder()
+                .selector(TransformSelector::Id(42))
+                .build(),
+        )
+        .await
+        .expect("reset_transform_state should succeed");
+
+    assert_eq!(response.success, Some(true));
+    assert_eq!(response.message.as_deref(), Some("reset"));
+}
+
+#[tokio::test]
+async fn update_transform_configuration_posts_capital_u_route_and_body_shape() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/MyProject/MyFolder/dataintegration-UpdateTransformConfiguration",
+        ))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "transformName": "LoadFromStaging",
+            "transformConfig": {
+                "description": "updated",
+                "enabled": true,
+                "properties": {"batchSize": 50}
+            }
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true,
+            "transformConfig": {
+                "description": "updated",
+                "enabled": true
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let mut config = TransformConfig::new();
+    config.description = Some("updated".to_string());
+    config.enabled = Some(true);
+    config.properties = Some(serde_json::json!({"batchSize": 50}));
+
+    let response = client
+        .update_transform_configuration(
+            UpdateTransformConfigurationOptions::builder()
+                .selector(TransformSelector::Name("LoadFromStaging".to_string()))
+                .transform_config(config)
+                .build(),
+        )
+        .await
+        .expect("update_transform_configuration should succeed");
+
+    assert_eq!(response.success, Some(true));
+    assert_eq!(
+        response
+            .transform_config
+            .as_ref()
+            .and_then(|value| value.enabled),
+        Some(true)
+    );
+}
+
+#[tokio::test]
+async fn create_list_delegates_to_create_domain_with_expected_mapping() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/property-createDomain.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_string_contains("\"kind\":\"IntList\""))
+        .and(body_string_contains("\"keyName\":\"RowId\""))
+        .and(body_string_contains("\"name\":\"DelegatedList\""))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true,
+            "domainId": 88
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .create_list(
+            CreateListOptions::builder()
+                .name("DelegatedList".to_string())
+                .key_name("RowId".to_string())
+                .key_type(ListKeyType::IntList)
+                .build(),
+        )
+        .await
+        .expect("create_list should delegate to create_domain");
+
+    assert_eq!(response["success"], serde_json::json!(true));
+    assert_eq!(response["domainId"], serde_json::json!(88));
 }
 
 #[tokio::test]
