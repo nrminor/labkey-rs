@@ -1,7 +1,6 @@
 //! Experiment models and APIs for lineage, batch, run, and sequence operations.
 
-use std::collections::HashMap;
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};

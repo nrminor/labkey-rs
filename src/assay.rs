@@ -1,7 +1,6 @@
 //! Assay models and API endpoints for assay listing and `NAb` queries.
 
-use std::collections::HashMap;
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -474,12 +473,6 @@ struct ProtocolEnvelope {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GetAssaysBody {
-    parameters: GetAssaysParameters,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct GetAssaysParameters {
     #[serde(skip_serializing_if = "Option::is_none")]
     id: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -518,8 +511,8 @@ enum ImportRunPart {
 impl LabkeyClient {
     /// Get assay designs in a container.
     ///
-    /// Sends a POST request to `assay-assayList.api` with all filter values
-    /// nested under a top-level `parameters` object.
+    /// Sends a POST request to `assay-assayList.api` with filter values as
+    /// flat top-level fields in the JSON body.
     ///
     /// # Errors
     ///
@@ -862,8 +855,10 @@ impl LabkeyClient {
     /// Sends a POST request to `assay-importRun.api` with multipart payload
     /// encoding. When `use_json` is unset or `false`, parameters are emitted as
     /// individual parts, including bracket-notation property keys
-    /// (`properties[key]` and `batchProperties[key]`). When `use_json` is
-    /// `true`, the request sends exactly one `json` part with the full payload.
+    /// (`properties['key']` and `batchProperties['key']`). When `use_json` is
+    /// `true`, the request sends a `json` part with the structured payload; if
+    /// the source is a [`ImportRunSource::File`], a separate `file` binary part
+    /// is also included alongside the JSON part.
     ///
     /// # Errors
     ///
@@ -914,13 +909,11 @@ impl LabkeyClient {
 
 fn build_get_assays_body(options: &GetAssaysOptions) -> GetAssaysBody {
     GetAssaysBody {
-        parameters: GetAssaysParameters {
-            id: options.id,
-            name: options.name.clone(),
-            plate_enabled: options.plate_enabled,
-            status: options.status.clone(),
-            type_: options.type_.clone(),
-        },
+        id: options.id,
+        name: options.name.clone(),
+        plate_enabled: options.plate_enabled,
+        status: options.status.clone(),
+        type_: options.type_.clone(),
     }
 }
 
@@ -1021,10 +1014,23 @@ fn validate_import_run_options(options: &ImportRunOptions) -> Result<(), LabkeyE
 
 fn build_import_run_parts(options: &ImportRunOptions) -> Vec<ImportRunPart> {
     if options.use_json.unwrap_or(false) {
-        return vec![ImportRunPart::Json {
+        let mut parts = vec![ImportRunPart::Json {
             name: "json".to_string(),
             value: build_import_run_json_payload(options).to_string(),
         }];
+
+        // Java ImportRunCommand adds the file part outside the useJson branch,
+        // so it is always sent as a separate binary multipart part regardless
+        // of JSON mode.
+        if let ImportRunSource::File { data, filename } = &options.source {
+            parts.push(ImportRunPart::File {
+                name: "file".to_string(),
+                filename: filename.clone(),
+                data: data.clone(),
+            });
+        }
+
+        return parts;
     }
 
     let mut parts = vec![ImportRunPart::Text {
@@ -1210,12 +1216,9 @@ fn build_import_run_json_payload(options: &ImportRunOptions) -> serde_json::Valu
     );
 
     match &options.source {
-        ImportRunSource::File { data, filename } => {
-            payload.insert(
-                "file".to_string(),
-                serde_json::json!({"filename": filename, "data": data}),
-            );
-        }
+        // File source is sent as a separate binary multipart part, not in the
+        // JSON payload. See build_import_run_parts for the file part emission.
+        ImportRunSource::File { .. } => {}
         ImportRunSource::RunFilePath(path) => {
             payload.insert(
                 "runFilePath".to_string(),
@@ -1283,7 +1286,7 @@ fn append_property_parts(
             continue;
         }
 
-        let part_name = format!("{prefix}[{key}]");
+        let part_name = format!("{prefix}['{key}']");
         let part_value = property_value_to_string(value);
         parts.push(ImportRunPart::Text {
             name: part_name,
@@ -1530,7 +1533,7 @@ mod tests {
     }
 
     #[test]
-    fn get_assays_body_wraps_filters_in_parameters_object() {
+    fn get_assays_body_sends_flat_fields() {
         let options = GetAssaysOptions::builder()
             .id(7)
             .name("MyAssay".to_string())
@@ -1540,26 +1543,21 @@ mod tests {
             .build();
 
         let body = serde_json::to_value(build_get_assays_body(&options)).expect("serialize body");
-        assert_eq!(body["parameters"]["id"], 7);
-        assert_eq!(body["parameters"]["name"], "MyAssay");
-        assert_eq!(body["parameters"]["plateEnabled"], true);
-        assert_eq!(body["parameters"]["status"], "Active");
-        assert_eq!(body["parameters"]["type"], "General");
-        assert!(body.get("id").is_none());
-        assert!(body.get("name").is_none());
+        assert_eq!(body["id"], 7);
+        assert_eq!(body["name"], "MyAssay");
+        assert_eq!(body["plateEnabled"], true);
+        assert_eq!(body["status"], "Active");
+        assert_eq!(body["type"], "General");
+        assert!(body.get("parameters").is_none());
     }
 
     #[test]
-    fn get_assays_body_omits_unset_parameters() {
+    fn get_assays_body_omits_unset_fields() {
         let options = GetAssaysOptions::builder().build();
         let body = serde_json::to_value(build_get_assays_body(&options)).expect("serialize body");
 
-        assert!(body.get("parameters").is_some());
-        assert!(
-            body["parameters"]
-                .as_object()
-                .is_some_and(serde_json::Map::is_empty)
-        );
+        assert!(body.get("parameters").is_none());
+        assert!(body.as_object().is_some_and(serde_json::Map::is_empty));
     }
 
     #[test]
@@ -2021,24 +2019,24 @@ mod tests {
             value: "Run 1".to_string(),
         }));
         assert!(parts.contains(&ImportRunPart::Text {
-            name: "properties[qc]".to_string(),
+            name: "properties['qc']".to_string(),
             value: "pass".to_string(),
         }));
         assert!(parts.iter().any(|part| {
             matches!(
                 part,
                 ImportRunPart::Text { name, value }
-                if name == "properties[metadata]" && value.contains("instrument")
+                if name == "properties['metadata']" && value.contains("instrument")
             )
         }));
         assert!(parts.contains(&ImportRunPart::Text {
-            name: "batchProperties[batchFlag]".to_string(),
+            name: "batchProperties['batchFlag']".to_string(),
             value: "yes".to_string(),
         }));
         assert!(!parts.iter().any(|part| {
             matches!(
                 part,
-                ImportRunPart::Text { name, .. } if name == "batchProperties[skip]"
+                ImportRunPart::Text { name, .. } if name == "batchProperties['skip']"
             )
         }));
         assert!(parts.iter().any(|part| {
@@ -2051,7 +2049,72 @@ mod tests {
     }
 
     #[test]
-    fn import_run_json_mode_uses_single_json_part() {
+    fn import_run_bracket_keys_handle_special_characters() {
+        let properties = HashMap::from([
+            (
+                "emoji_\u{1F642}".to_string(),
+                serde_json::Value::String("smile".to_string()),
+            ),
+            (
+                "qu\"ot'ed\"key".to_string(),
+                serde_json::Value::String("quotes\" are 'ok\"".to_string()),
+            ),
+            (
+                "with[brackets]".to_string(),
+                serde_json::Value::String("square brackets".to_string()),
+            ),
+            (
+                "unicode_\u{00B5}g/\u{03BC}L".to_string(),
+                serde_json::Value::String("micro units".to_string()),
+            ),
+            (
+                "someInt".to_string(),
+                serde_json::Value::Number(serde_json::Number::from(42)),
+            ),
+            ("array_primitive".to_string(), serde_json::json!([1, 2, 3])),
+            ("empty_object".to_string(), serde_json::json!({})),
+        ]);
+
+        let options = ImportRunOptions::builder()
+            .assay_id(1)
+            .source(ImportRunSource::DataRows(vec![serde_json::json!({})]))
+            .properties(properties)
+            .build();
+
+        let parts = build_import_run_parts(&options);
+
+        assert!(parts.contains(&ImportRunPart::Text {
+            name: "properties['emoji_\u{1F642}']".to_string(),
+            value: "smile".to_string(),
+        }));
+        assert!(parts.contains(&ImportRunPart::Text {
+            name: "properties['qu\"ot'ed\"key']".to_string(),
+            value: "quotes\" are 'ok\"".to_string(),
+        }));
+        assert!(parts.contains(&ImportRunPart::Text {
+            name: "properties['with[brackets]']".to_string(),
+            value: "square brackets".to_string(),
+        }));
+        assert!(parts.contains(&ImportRunPart::Text {
+            name: "properties['unicode_\u{00B5}g/\u{03BC}L']".to_string(),
+            value: "micro units".to_string(),
+        }));
+        assert!(parts.contains(&ImportRunPart::Text {
+            name: "properties['someInt']".to_string(),
+            value: "42".to_string(),
+        }));
+        assert!(parts.contains(&ImportRunPart::Text {
+            name: "properties['array_primitive']".to_string(),
+            value: "[1,2,3]".to_string(),
+        }));
+        assert!(parts.contains(&ImportRunPart::Text {
+            name: "properties['empty_object']".to_string(),
+            value: "{}".to_string(),
+        }));
+    }
+
+    #[test]
+    fn import_run_json_mode_with_file_sends_json_and_binary_parts() {
         let options = ImportRunOptions::builder()
             .assay_id(42)
             .source(ImportRunSource::File {
@@ -2060,6 +2123,49 @@ mod tests {
             })
             .use_json(true)
             .allow_lookup_by_alternate_key(true)
+            .build();
+
+        let parts = build_import_run_parts(&options);
+
+        // Java ImportRunCommand sends both a json text part and a file binary
+        // part when useJson=true with a file source.
+        assert_eq!(parts.len(), 2);
+
+        match &parts[0] {
+            ImportRunPart::Json { name, value } => {
+                assert_eq!(name, "json");
+                let payload: serde_json::Value =
+                    serde_json::from_str(value).expect("json payload should parse");
+                assert_eq!(payload["assayId"], 42);
+                assert_eq!(payload["useJson"], true);
+                assert_eq!(payload["allowLookupByAlternateKey"], true);
+                // File data must NOT be in the JSON payload — it goes as a
+                // separate binary part.
+                assert!(payload.get("file").is_none());
+            }
+            other => panic!("expected json part first, got {other:?}"),
+        }
+
+        match &parts[1] {
+            ImportRunPart::File {
+                name,
+                filename,
+                data,
+            } => {
+                assert_eq!(name, "file");
+                assert_eq!(filename, "run.tsv");
+                assert_eq!(data, b"A\tB\n1\t2");
+            }
+            other => panic!("expected file part second, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn import_run_json_mode_with_non_file_source_sends_single_json_part() {
+        let options = ImportRunOptions::builder()
+            .assay_id(42)
+            .source(ImportRunSource::DataRows(vec![serde_json::json!({"x": 1})]))
+            .use_json(true)
             .build();
 
         let parts = build_import_run_parts(&options);
@@ -2072,16 +2178,9 @@ mod tests {
                     serde_json::from_str(value).expect("json payload should parse");
                 assert_eq!(payload["assayId"], 42);
                 assert_eq!(payload["useJson"], true);
-                assert_eq!(payload["allowLookupByAlternateKey"], true);
-                assert_eq!(payload["file"]["filename"], "run.tsv");
-                assert_eq!(
-                    payload["file"]["data"],
-                    serde_json::json!([65, 9, 66, 10, 49, 9, 50])
-                );
+                assert!(payload.get("dataRows").is_some());
             }
-            other @ (ImportRunPart::Text { .. } | ImportRunPart::File { .. }) => {
-                panic!("expected single json part, got {other:?}")
-            }
+            other => panic!("expected json part, got {other:?}"),
         }
     }
 
