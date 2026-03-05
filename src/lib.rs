@@ -25,6 +25,7 @@
 
 pub mod client;
 pub mod common;
+pub mod domain;
 pub mod error;
 pub mod filter;
 pub mod query;
