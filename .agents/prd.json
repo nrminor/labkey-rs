@@ -332,8 +332,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 17,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented US-017 by adding src/security/permission.rs and src/security/policy.rs, wiring both through src/security/mod.rs, and exporting all new permission/policy option and response models. Added LabkeyClient methods get_group_permissions, get_user_permissions, get_roles, get_securable_resources, get_policy, save_policy, and delete_policy with security-controller routes matching upstream contracts. Modeled options with bon builders and optional container_path overrides, added typed JSON request bodies for resourceId-based policy endpoints, and implemented get_policy as POST with response stamping so policy.requested_resource_id reflects the requested resource id. Added private envelope extraction for get_securable_resources and get_policy that maps malformed/missing envelopes to LabkeyError::UnexpectedResponse with endpoint-specific diagnostics. Implemented get_roles permission-reference expansion from server role/permission blocks with explicit erroring on unresolved permission references to avoid silent data loss. Hardened validation for blank user_email in get_user_permissions and blank resource_id in get_policy/delete_policy with LabkeyError::InvalidInput. Extended shared SecurableResource typing with effective_permissions and Policy with requested_resource_id for parity. Expanded unit and integration tests for all seven endpoint URLs and request contracts, recursive and minimal deserialization paths for PermissionsContainer and SecurableResource, envelope failure behavior, userId vs userEmail precedence, policy body normalization behavior, and invalid-input fast-fail paths. Updated .gitignore allow-list for src/security/permission.rs and src/security/policy.rs, solicited feedback from nick-isms/testing-guru/semver-nag, addressed follow-up feedback with additional robustness and coverage improvements, and re-ran just check successfully before and after feedback updates."
     },
     {
       "id": "US-018",

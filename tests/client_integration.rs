@@ -19,9 +19,11 @@ use labkey_rs::query::{
 };
 use labkey_rs::security::{
     AddGroupMembersOptions, CreateGroupOptions, CreateNewUserOptions, DeleteGroupOptions,
-    EnsureLoginOptions, GetFolderTypesOptions, GetGroupsForCurrentUserOptions, GetModulesOptions,
-    GetReadableContainersOptions, GetUsersOptions, GetUsersWithPermissionsOptions,
-    MoveContainerOptions, RemoveGroupMembersOptions, RenameGroupOptions,
+    DeletePolicyOptions, EnsureLoginOptions, GetFolderTypesOptions, GetGroupPermissionsOptions,
+    GetGroupsForCurrentUserOptions, GetModulesOptions, GetPolicyOptions,
+    GetReadableContainersOptions, GetRolesOptions, GetSecurableResourcesOptions,
+    GetUserPermissionsOptions, GetUsersOptions, GetUsersWithPermissionsOptions,
+    MoveContainerOptions, RemoveGroupMembersOptions, RenameGroupOptions, SavePolicyOptions,
 };
 use url::Url;
 use wiremock::matchers::{
@@ -2624,4 +2626,404 @@ async fn get_groups_for_current_user_gets_expected_response_shape() {
         .expect("get groups for current user should succeed");
     assert_eq!(groups.groups.len(), 1);
     assert_eq!(groups.groups[0].name, "Senior Analysts");
+}
+
+#[tokio::test]
+async fn get_group_permissions_sends_expected_params_and_deserializes_children() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/security-getGroupPerms.api"))
+        .and(query_param("includeSubfolders", "true"))
+        .and(query_param("includeEmptyPermGroups", "false"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "container": {
+                "id": "c1",
+                "name": "Project",
+                "path": "/Alt/Container",
+                "groups": [{"groupId": 9, "name": "Readers"}],
+                "children": [{
+                    "id": "c2",
+                    "name": "Subfolder",
+                    "path": "/Alt/Container/Subfolder",
+                    "groups": [],
+                    "children": []
+                }]
+            }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .get_group_permissions(
+            GetGroupPermissionsOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .include_subfolders(true)
+                .include_empty_perm_groups(false)
+                .build(),
+        )
+        .await
+        .expect("get group permissions should succeed");
+
+    assert_eq!(response.container.id, "c1");
+    assert_eq!(response.container.children.len(), 1);
+}
+
+#[tokio::test]
+async fn get_user_permissions_sends_user_email_and_deserializes_response() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/security-getUserPerms.api"))
+        .and(query_param("userEmail", "analyst@example.com"))
+        .and(query_param("includeSubfolders", "true"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "container": {
+                "id": "c1",
+                "name": "Project",
+                "path": "/Alt/Container",
+                "groups": [],
+                "children": [],
+                "effectivePermissions": ["org.labkey.api.security.permissions.ReadPermission"],
+                "roles": ["org.labkey.security.roles.ReaderRole"]
+            },
+            "user": {
+                "displayName": "Analyst",
+                "userId": 101
+            }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .get_user_permissions(
+            GetUserPermissionsOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .user_email("analyst@example.com".to_string())
+                .include_subfolders(true)
+                .build(),
+        )
+        .await
+        .expect("get user permissions should succeed");
+
+    assert_eq!(response.user.user_id, 101);
+    assert_eq!(response.container.roles.len(), 1);
+}
+
+#[tokio::test]
+async fn get_user_permissions_prefers_user_id_and_omits_user_email() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/security-getUserPerms.api"))
+        .and(query_param("userId", "101"))
+        .and(query_param_is_missing("userEmail"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "container": {
+                "id": "c1",
+                "name": "Project",
+                "path": "/Alt/Container",
+                "groups": [],
+                "children": []
+            },
+            "user": {
+                "userId": 101
+            }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .get_user_permissions(
+            GetUserPermissionsOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .user_id(101)
+                .user_email("ignored@example.com".to_string())
+                .build(),
+        )
+        .await
+        .expect("get user permissions should succeed");
+
+    assert_eq!(response.user.user_id, 101);
+}
+
+#[tokio::test]
+async fn get_roles_expands_role_permission_references() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/security-getRoles.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "permissions": [
+                {
+                    "name": "Read",
+                    "className": "org.labkey.api.security.permissions.ReadPermission",
+                    "uniqueName": "org.labkey.api.security.permissions.ReadPermission"
+                }
+            ],
+            "roles": [
+                {
+                    "name": "Reader",
+                    "uniqueName": "org.labkey.security.roles.ReaderRole",
+                    "permissions": ["org.labkey.api.security.permissions.ReadPermission"]
+                }
+            ]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let roles = client
+        .get_roles(
+            GetRolesOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .build(),
+        )
+        .await
+        .expect("get roles should succeed");
+
+    assert_eq!(roles.len(), 1);
+    assert_eq!(roles[0].permissions.len(), 1);
+    assert_eq!(roles[0].permissions[0].name, "Read");
+}
+
+#[tokio::test]
+async fn get_securable_resources_extracts_envelope_and_params() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/security-getSecurableResources.api"))
+        .and(query_param("includeSubfolders", "true"))
+        .and(query_param("includeEffectivePermissions", "true"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "resources": {
+                "resourceId": "root",
+                "name": "Root",
+                "children": [{
+                    "resourceId": "child",
+                    "name": "Child",
+                    "children": []
+                }]
+            }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let resources = client
+        .get_securable_resources(
+            GetSecurableResourcesOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .include_subfolders(true)
+                .include_effective_permissions(true)
+                .build(),
+        )
+        .await
+        .expect("get securable resources should succeed");
+
+    assert_eq!(resources.resource_id, "root");
+    assert_eq!(resources.children.len(), 1);
+}
+
+#[tokio::test]
+async fn get_securable_resources_missing_envelope_maps_to_unexpected_response() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/security-getSecurableResources.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "resource": {}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client
+        .get_securable_resources(
+            GetSecurableResourcesOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .build(),
+        )
+        .await;
+
+    match result {
+        Err(LabkeyError::UnexpectedResponse { status, text }) => {
+            assert_eq!(status, reqwest::StatusCode::OK);
+            assert!(text.contains("getSecurableResources"));
+        }
+        other => panic!("expected UnexpectedResponse, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn get_policy_posts_body_and_stamps_requested_resource_id() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/security-getPolicy.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "resourceId": "resource-1"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "policy": {
+                "resourceId": "resource-from-server",
+                "assignments": []
+            },
+            "relevantRoles": ["org.labkey.security.roles.ReaderRole"]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .get_policy(
+            GetPolicyOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .resource_id("resource-1".to_string())
+                .build(),
+        )
+        .await
+        .expect("get policy should succeed");
+
+    assert_eq!(
+        response.policy.resource_id.as_deref(),
+        Some("resource-from-server")
+    );
+    assert_eq!(
+        response.policy.requested_resource_id.as_deref(),
+        Some("resource-1")
+    );
+    assert_eq!(response.relevant_roles.len(), 1);
+}
+
+#[tokio::test]
+async fn save_policy_sends_expected_request_shape() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/security-savePolicy.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "resourceId": "resource-1",
+            "assignments": []
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let save_response = client
+        .save_policy(
+            SavePolicyOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .policy(serde_json::json!({
+                    "policy": {
+                        "resourceId": "resource-1",
+                        "assignments": []
+                    }
+                }))
+                .build(),
+        )
+        .await
+        .expect("save policy should succeed");
+    assert_eq!(save_response.success, Some(true));
+}
+
+#[tokio::test]
+async fn delete_policy_sends_expected_request_shape() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/security-deletePolicy.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "resourceId": "resource-1"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let delete_response = client
+        .delete_policy(
+            DeletePolicyOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .resource_id("resource-1".to_string())
+                .build(),
+        )
+        .await
+        .expect("delete policy should succeed");
+    assert_eq!(delete_response.success, Some(true));
+}
+
+#[tokio::test]
+async fn get_policy_rejects_blank_resource_id() {
+    let client = test_client("https://labkey.example.com");
+
+    let result = client
+        .get_policy(
+            GetPolicyOptions::builder()
+                .resource_id("   ".to_string())
+                .build(),
+        )
+        .await;
+
+    match result {
+        Err(LabkeyError::InvalidInput(message)) => {
+            assert_eq!(message, "get_policy resource_id cannot be empty");
+        }
+        other => panic!("expected InvalidInput, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn delete_policy_rejects_blank_resource_id() {
+    let client = test_client("https://labkey.example.com");
+
+    let result = client
+        .delete_policy(
+            DeletePolicyOptions::builder()
+                .resource_id("\n\t".to_string())
+                .build(),
+        )
+        .await;
+
+    match result {
+        Err(LabkeyError::InvalidInput(message)) => {
+            assert_eq!(message, "delete_policy resource_id cannot be empty");
+        }
+        other => panic!("expected InvalidInput, got {other:?}"),
+    }
 }

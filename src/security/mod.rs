@@ -2,6 +2,8 @@
 
 mod container;
 mod group;
+mod permission;
+mod policy;
 mod types;
 mod user;
 
@@ -15,6 +17,15 @@ pub use group::{
     DeleteGroupOptions, DeleteGroupResponse, GetGroupsForCurrentUserOptions,
     GetGroupsForCurrentUserResponse, GroupForCurrentUser, RemoveGroupMembersOptions,
     RemoveGroupMembersResponse, RenameGroupOptions, RenameGroupResponse,
+};
+pub use permission::{
+    GetGroupPermissionsOptions, GetRolesOptions, GetSecurableResourcesOptions,
+    GetUserPermissionsOptions, GetUserPermissionsResponse, GroupPermissionsResponse,
+    PermissionUser, PermissionsContainer, UserPermissionsContainer,
+};
+pub use policy::{
+    DeletePolicyOptions, DeletePolicyResponse, GetPolicyOptions, GetPolicyResponse,
+    SavePolicyOptions, SavePolicyResponse,
 };
 pub use types::{
     Container, ContainerFormats, ContainerHierarchy, FolderType, FolderTypeWebPart, Group,

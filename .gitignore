@@ -35,6 +35,8 @@
 !/src/security/container.rs
 !/src/security/user.rs
 !/src/security/group.rs
+!/src/security/permission.rs
+!/src/security/policy.rs
 
 # === Allowed: Tests ===
 !/tests

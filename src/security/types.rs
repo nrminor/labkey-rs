@@ -203,6 +203,9 @@ pub struct SecurableResource {
     /// Resource name.
     #[serde(default)]
     pub name: Option<String>,
+    /// Effective permission unique names for the current user.
+    #[serde(default)]
+    pub effective_permissions: Vec<String>,
     /// Child resources.
     #[serde(default)]
     pub children: Vec<SecurableResource>,
@@ -232,6 +235,9 @@ pub struct Policy {
     /// Policy resource id.
     #[serde(default)]
     pub resource_id: Option<String>,
+    /// Resource id requested by the caller when policy inheritance is resolved.
+    #[serde(default)]
+    pub requested_resource_id: Option<String>,
     /// Policy assignments.
     #[serde(default)]
     pub assignments: Vec<PolicyAssignment>,
