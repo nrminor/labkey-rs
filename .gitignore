@@ -32,6 +32,7 @@
 !/src/security
 !/src/security/mod.rs
 !/src/security/types.rs
+!/src/security/container.rs
 
 # === Allowed: Tests ===
 !/tests

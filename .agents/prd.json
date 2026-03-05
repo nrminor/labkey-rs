@@ -270,8 +270,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented US-014 by adding src/security/container.rs and wiring it through src/security/mod.rs with re-exported CreateContainerOptions, DeleteContainerOptions, RenameContainerOptions, and GetContainersOptions (all non-exhaustive bon-builder structs with optional container_path). Added LabkeyClient methods create_container (core-createContainer.api), delete_container (core-deleteContainer.api), rename_container (admin-renameContainer.api), and get_containers (project-getContainers.api). Added typed serializable request bodies for create/delete/rename using skip_serializing_if for optional fields and no json! macros. Added rename_container client-side validation that returns LabkeyError::InvalidInput with a descriptive message when both name and title are absent. Implemented get_containers parameter shaping with shared opt() usage and repeated container/moduleProperties params, including multipleContainers=true when multiple container ids/paths are provided. Implemented response extraction that normalizes both single-object and { containers: [...] } envelope responses into Vec<ContainerHierarchy>, with UnexpectedResponse for invalid envelope shapes. Added unit tests for endpoint URL routing, create/rename body serialization contracts, get_containers param construction (including multipleContainers=true), extraction for both response shapes, and invalid/null envelope edge cases. Added rustdocs with # Errors and no_run # Example sections for all four endpoints, allow-listed src/security/container.rs in .gitignore, solicited feedback from nick-isms/testing-guru/semver-nag, incorporated follow-up test and robustness adjustments, and verified all gates with just check after implementation and after feedback updates."
     },
     {
       "id": "US-015",
