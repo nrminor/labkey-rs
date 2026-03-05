@@ -1,0 +1,7 @@
+{
+  "authenticated": true,
+  "email": "analyst@example.com",
+  "impersonated": false,
+  "userId": 101,
+  "displayName": "Analyst User"
+}

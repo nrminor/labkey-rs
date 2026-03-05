@@ -353,8 +353,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 18,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented US-018 by adding src/security/session.rs and wiring it through src/security/mod.rs with exported LogoutOptions, WhoAmIOptions/WhoAmIResponse, DeleteUserOptions/DeleteUserResponse, ImpersonateTarget/ImpersonateUserOptions, and StopImpersonatingOptions. Added LabkeyClient methods logout (POST login-logout with no .api suffix, no params, empty body), who_am_i (GET login-whoami.api), delete_user (POST security-deleteUser with no .api suffix and typed { id } body), impersonate_user (POST user-impersonateUser.api using query params with empty body for both userId/email modes), and stop_impersonating (POST login-stopImpersonating.api with RequestOptions no_follow_redirects=true and accepted_statuses=[302 FOUND]). Extended client transport with post_without_body/post_without_body_with_options and empty-response status handling so non-JSON success responses and redirect-status success semantics are supported without deserialization failures. Added tests/fixtures/whoami.json and expanded unit/integration coverage for all endpoint URL/suffix contracts, logout no-body/no-query behavior, who_am_i fixture+minimal deserialization, delete_user typed body and typed response deserialization, ImpersonateTarget mapping for both variants plus blank-email validation and encoded query behavior, and stop_impersonating 302 success while asserting redirects are not followed. Updated .gitignore allow-list for src/security/session.rs and tests/fixtures/whoami.json. Solicited feedback from nick-isms/testing-guru/semver-nag, addressed review-driven test/API improvements, and verified full quality gates with just check after implementation and after feedback updates."
     },
     {
       "id": "US-019",

@@ -4,6 +4,7 @@ mod container;
 mod group;
 mod permission;
 mod policy;
+mod session;
 mod types;
 mod user;
 
@@ -26,6 +27,10 @@ pub use permission::{
 pub use policy::{
     DeletePolicyOptions, DeletePolicyResponse, GetPolicyOptions, GetPolicyResponse,
     SavePolicyOptions, SavePolicyResponse,
+};
+pub use session::{
+    DeleteUserOptions, DeleteUserResponse, ImpersonateTarget, ImpersonateUserOptions,
+    LogoutOptions, StopImpersonatingOptions, WhoAmIOptions, WhoAmIResponse,
 };
 pub use types::{
     Container, ContainerFormats, ContainerHierarchy, FolderType, FolderTypeWebPart, Group,

@@ -19,16 +19,17 @@ use labkey_rs::query::{
 };
 use labkey_rs::security::{
     AddGroupMembersOptions, CreateGroupOptions, CreateNewUserOptions, DeleteGroupOptions,
-    DeletePolicyOptions, EnsureLoginOptions, GetFolderTypesOptions, GetGroupPermissionsOptions,
-    GetGroupsForCurrentUserOptions, GetModulesOptions, GetPolicyOptions,
-    GetReadableContainersOptions, GetRolesOptions, GetSecurableResourcesOptions,
-    GetUserPermissionsOptions, GetUsersOptions, GetUsersWithPermissionsOptions,
-    MoveContainerOptions, RemoveGroupMembersOptions, RenameGroupOptions, SavePolicyOptions,
+    DeletePolicyOptions, DeleteUserOptions, EnsureLoginOptions, GetFolderTypesOptions,
+    GetGroupPermissionsOptions, GetGroupsForCurrentUserOptions, GetModulesOptions,
+    GetPolicyOptions, GetReadableContainersOptions, GetRolesOptions, GetSecurableResourcesOptions,
+    GetUserPermissionsOptions, GetUsersOptions, GetUsersWithPermissionsOptions, ImpersonateTarget,
+    ImpersonateUserOptions, LogoutOptions, MoveContainerOptions, RemoveGroupMembersOptions,
+    RenameGroupOptions, SavePolicyOptions, StopImpersonatingOptions, WhoAmIOptions,
 };
 use url::Url;
 use wiremock::matchers::{
-    basic_auth, body_json, body_string_contains, header, header_exists, method, path, query_param,
-    query_param_is_missing,
+    basic_auth, body_json, body_string, body_string_contains, header, header_exists, method, path,
+    query_param, query_param_is_missing,
 };
 
 fn waf_encode_for_test(value: &str) -> String {
@@ -2295,6 +2296,238 @@ async fn ensure_login_gets_expected_endpoint_and_deserializes_current_user() {
         .expect("ensure login should succeed");
 
     assert_eq!(response.current_user.user_id, 7);
+}
+
+#[tokio::test]
+async fn logout_posts_no_body_to_login_logout_without_api_suffix() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/login-logout"))
+        .and(query_param_is_missing("id"))
+        .and(query_param_is_missing("email"))
+        .and(query_param_is_missing("userId"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_string(String::new()))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    client
+        .logout(
+            LogoutOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .build(),
+        )
+        .await
+        .expect("logout should succeed");
+}
+
+#[tokio::test]
+async fn who_am_i_gets_login_whoami_api_and_deserializes_fixture_response() {
+    let server = MockServer::start().await;
+    let payload: serde_json::Value = fixture("whoami.json");
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/login-whoami.api"))
+        .and(query_param_is_missing("id"))
+        .and(query_param_is_missing("email"))
+        .and(query_param_is_missing("userId"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(payload))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .who_am_i(
+            WhoAmIOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .build(),
+        )
+        .await
+        .expect("who_am_i should succeed");
+
+    assert_eq!(response.user_id, Some(101));
+    assert_eq!(response.email.as_deref(), Some("analyst@example.com"));
+}
+
+#[tokio::test]
+async fn delete_user_posts_typed_id_body_to_security_delete_user_without_api_suffix() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/security-deleteUser"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "id": 101
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "deleted": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .delete_user(
+            DeleteUserOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .id(101)
+                .build(),
+        )
+        .await
+        .expect("delete_user should succeed");
+
+    assert_eq!(response.deleted, Some(true));
+}
+
+#[tokio::test]
+async fn impersonate_user_uses_query_params_and_empty_request_body_for_both_target_modes() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/user-impersonateUser.api"))
+        .and(query_param("userId", "101"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_string(String::new()))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/user-impersonateUser.api"))
+        .and(query_param("email", "analyst@example.com"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_string(String::new()))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+
+    client
+        .impersonate_user(
+            ImpersonateUserOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .target(ImpersonateTarget::UserId(101))
+                .build(),
+        )
+        .await
+        .expect("impersonate by user id should succeed");
+
+    client
+        .impersonate_user(
+            ImpersonateUserOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .target(ImpersonateTarget::Email("analyst@example.com".to_string()))
+                .build(),
+        )
+        .await
+        .expect("impersonate by email should succeed");
+}
+
+#[tokio::test]
+async fn impersonate_user_query_encodes_email_target_values() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/user-impersonateUser.api"))
+        .and(query_param("email", "ana+lyst test@example.com"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_string(String::new()))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    client
+        .impersonate_user(
+            ImpersonateUserOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .target(ImpersonateTarget::Email(
+                    "ana+lyst test@example.com".to_string(),
+                ))
+                .build(),
+        )
+        .await
+        .expect("impersonate by encoded email should succeed");
+}
+
+#[tokio::test]
+async fn stop_impersonating_treats_http_302_as_success_without_following_redirects() {
+    let server = MockServer::start().await;
+    let redirected = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/landing"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("unexpected redirect follow"))
+        .expect(0)
+        .mount(&redirected)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/landing"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("unexpected redirect follow"))
+        .expect(0)
+        .mount(&redirected)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/login-stopImpersonating.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_string(String::new()))
+        .respond_with(
+            ResponseTemplate::new(302)
+                .insert_header("Location", format!("{}/landing", redirected.uri())),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    client
+        .stop_impersonating(
+            StopImpersonatingOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .build(),
+        )
+        .await
+        .expect("stop_impersonating should treat 302 as success");
+}
+
+#[tokio::test]
+async fn impersonate_user_rejects_blank_email_target() {
+    let client = test_client("https://labkey.example.com");
+
+    let result = client
+        .impersonate_user(
+            ImpersonateUserOptions::builder()
+                .target(ImpersonateTarget::Email("   ".to_string()))
+                .build(),
+        )
+        .await;
+
+    match result {
+        Err(LabkeyError::InvalidInput(message)) => {
+            assert_eq!(message, "impersonate_user email cannot be empty");
+        }
+        other => panic!("expected LabkeyError::InvalidInput, got {other:?}"),
+    }
 }
 
 #[tokio::test]

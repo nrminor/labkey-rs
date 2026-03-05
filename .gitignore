@@ -37,6 +37,7 @@
 !/src/security/group.rs
 !/src/security/permission.rs
 !/src/security/policy.rs
+!/src/security/session.rs
 
 # === Allowed: Tests ===
 !/tests
@@ -47,6 +48,7 @@
 !/tests/fixtures/api_error.json
 !/tests/fixtures/query_details.json
 !/tests/fixtures/get_schemas.json
+!/tests/fixtures/whoami.json
 
 # === Allowed: GitHub workflows ===
 !/.github

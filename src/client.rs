@@ -218,6 +218,18 @@ impl LabkeyClient {
         Ok(builder.build()?)
     }
 
+    fn build_post_request_without_body(
+        &self,
+        client: &reqwest::Client,
+        url: Url,
+        options: &RequestOptions,
+    ) -> Result<reqwest::Request, LabkeyError> {
+        let builder = client.post(url);
+        let builder = self.prepare_request(builder);
+        let builder = Self::apply_request_options(builder, options);
+        Ok(builder.build()?)
+    }
+
     /// Send a GET request and deserialize the JSON response.
     pub(crate) async fn get<T: serde::de::DeserializeOwned>(
         &self,
@@ -283,6 +295,25 @@ impl LabkeyClient {
             .await
     }
 
+    /// Send a POST request with no body.
+    pub(crate) async fn post_without_body(&self, url: Url) -> Result<(), LabkeyError> {
+        self.post_without_body_with_options(url, &RequestOptions::default())
+            .await
+    }
+
+    /// Send a POST request with no body and request options.
+    pub(crate) async fn post_without_body_with_options(
+        &self,
+        url: Url,
+        options: &RequestOptions,
+    ) -> Result<(), LabkeyError> {
+        let client = self.client_for_options(options);
+        let request = self.build_post_request_without_body(&client, url, options)?;
+        let response = client.execute(request).await?;
+        self.handle_empty_response(response, &options.accepted_statuses)
+            .await
+    }
+
     /// Check the response status and either deserialize the success body or
     /// construct an appropriate error.
     ///
@@ -298,6 +329,26 @@ impl LabkeyClient {
         if status.is_success() || accepted_statuses.contains(&status) {
             let body = response.json::<T>().await?;
             Ok(body)
+        } else {
+            let text = response.text().await.unwrap_or_default();
+            match serde_json::from_str::<ApiErrorBody>(&text) {
+                Ok(api_error) => Err(LabkeyError::Api {
+                    status,
+                    body: api_error,
+                }),
+                Err(_) => Err(LabkeyError::UnexpectedResponse { status, text }),
+            }
+        }
+    }
+
+    async fn handle_empty_response(
+        &self,
+        response: reqwest::Response,
+        accepted_statuses: &[StatusCode],
+    ) -> Result<(), LabkeyError> {
+        let status = response.status();
+        if status.is_success() || accepted_statuses.contains(&status) {
+            Ok(())
         } else {
             let text = response.text().await.unwrap_or_default();
             match serde_json::from_str::<ApiErrorBody>(&text) {
