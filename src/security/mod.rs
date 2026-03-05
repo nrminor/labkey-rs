@@ -4,7 +4,9 @@ mod container;
 mod types;
 
 pub use container::{
-    CreateContainerOptions, DeleteContainerOptions, GetContainersOptions, RenameContainerOptions,
+    CreateContainerOptions, DeleteContainerOptions, GetContainersOptions, GetFolderTypesOptions,
+    GetFolderTypesResponse, GetModulesOptions, GetModulesResponse, GetReadableContainersOptions,
+    MoveContainerOptions, MoveContainerResponse, RenameContainerOptions,
 };
 pub use types::{
     Container, ContainerFormats, ContainerHierarchy, FolderType, FolderTypeWebPart, Group,

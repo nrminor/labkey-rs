@@ -17,6 +17,9 @@ use labkey_rs::query::{
     SaveRowsCommand, SaveRowsOptions, SaveSessionViewOptions, SelectDistinctOptions,
     SelectRowsOptions, TruncateTableOptions, UpdateRowsOptions, ValidateQueryOptions,
 };
+use labkey_rs::security::{
+    GetFolderTypesOptions, GetModulesOptions, GetReadableContainersOptions, MoveContainerOptions,
+};
 use url::Url;
 use wiremock::matchers::{
     basic_auth, body_json, body_string_contains, header, header_exists, method, path, query_param,
@@ -1958,4 +1961,259 @@ async fn save_rows_sends_command_wire_values() {
     assert!(result.committed);
     assert_eq!(result.result.len(), 1);
     assert_eq!(result.result[0].command, "delete");
+}
+
+#[tokio::test]
+async fn get_readable_containers_sends_expected_params_and_extracts_envelope() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/project-getReadableContainers.api"))
+        .and(query_param("container", "/Home"))
+        .and(query_param("includeSubfolders", "true"))
+        .and(query_param("depth", "2"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "containers": ["/Home", "/Home/Project"]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .get_readable_containers(
+            GetReadableContainersOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .container(vec!["/Home".to_string(), "/Ignored".to_string()])
+                .include_subfolders(true)
+                .depth(2)
+                .build(),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(response, vec!["/Home", "/Home/Project"]);
+}
+
+#[tokio::test]
+async fn get_readable_containers_invalid_envelope_maps_to_unexpected_response() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path(
+            "/MyProject/MyFolder/project-getReadableContainers.api",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "paths": ["/Home"]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client
+        .get_readable_containers(GetReadableContainersOptions::builder().build())
+        .await;
+
+    match result {
+        Err(LabkeyError::UnexpectedResponse { status, text }) => {
+            assert_eq!(status, reqwest::StatusCode::OK);
+            assert!(text.contains("invalid getReadableContainers response"));
+        }
+        other => panic!("expected LabkeyError::UnexpectedResponse, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn get_readable_containers_non_array_envelope_maps_to_unexpected_response() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path(
+            "/MyProject/MyFolder/project-getReadableContainers.api",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "containers": "invalid"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let result = client
+        .get_readable_containers(GetReadableContainersOptions::builder().build())
+        .await;
+
+    match result {
+        Err(LabkeyError::UnexpectedResponse { status, text }) => {
+            assert_eq!(status, reqwest::StatusCode::OK);
+            assert!(text.contains("invalid getReadableContainers response"));
+        }
+        other => panic!("expected LabkeyError::UnexpectedResponse, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn get_folder_types_posts_and_deserializes_folder_map() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/core-getFolderTypes.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "Study": {
+                "name": "Study",
+                "label": "Study Folder",
+                "webParts": []
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .get_folder_types(
+            GetFolderTypesOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .build(),
+        )
+        .await
+        .expect("get folder types should succeed");
+
+    assert_eq!(response.folder_types.len(), 1);
+    assert_eq!(
+        response
+            .folder_types
+            .get("Study")
+            .expect("study type should exist")
+            .name,
+        "Study"
+    );
+}
+
+#[tokio::test]
+async fn get_modules_posts_and_deserializes_module_info_array() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/admin-getModules.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "folderType": "Collaboration",
+            "modules": [
+                {"name": "core", "properties": []},
+                {"name": "query", "properties": [{"name": "version", "value": "1"}]}
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .get_modules(
+            GetModulesOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .build(),
+        )
+        .await
+        .expect("get modules should succeed");
+
+    assert_eq!(response.folder_type.as_deref(), Some("Collaboration"));
+    assert_eq!(response.modules.len(), 2);
+    assert_eq!(response.modules[1].name, "query");
+}
+
+#[tokio::test]
+async fn move_container_posts_expected_body_and_url_contracts() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Source/Folder/core-moveContainer.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "container": "/Source/Folder",
+            "parent": "/Target/Parent",
+            "addAlias": true
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true,
+            "newPath": "/Target/Parent/Folder"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/core-moveContainer.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "container": "/Alt/Container",
+            "parent": "/Target/Parent"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": false
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+
+    let first = client
+        .move_container(
+            MoveContainerOptions::builder()
+                .container("/Source/Folder".to_string())
+                .parent("/Target/Parent".to_string())
+                .add_alias(true)
+                .build(),
+        )
+        .await
+        .expect("move container should succeed");
+    assert_eq!(first.success, Some(true));
+    assert_eq!(
+        first.extra.get("newPath"),
+        Some(&serde_json::json!("/Target/Parent/Folder"))
+    );
+
+    let second = client
+        .move_container(
+            MoveContainerOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .container("/Alt/Container".to_string())
+                .parent("/Target/Parent".to_string())
+                .build(),
+        )
+        .await
+        .expect("move container with override should succeed");
+    assert_eq!(second.success, Some(false));
+}
+
+#[tokio::test]
+async fn move_container_rejects_mismatched_container_path_override() {
+    let client = test_client("https://labkey.example.com");
+
+    let result = client
+        .move_container(
+            MoveContainerOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .container("/Source/Folder".to_string())
+                .parent("/Target/Parent".to_string())
+                .build(),
+        )
+        .await;
+
+    match result {
+        Err(LabkeyError::InvalidInput(message)) => {
+            assert_eq!(
+                message,
+                "move_container requires `container_path` to match `container` when provided"
+            );
+        }
+        other => panic!("expected LabkeyError::InvalidInput, got {other:?}"),
+    }
 }

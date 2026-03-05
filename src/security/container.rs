@@ -1,5 +1,7 @@
 //! Container-focused security endpoints.
 
+use std::collections::HashMap;
+
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
@@ -7,7 +9,7 @@ use crate::{
     client::LabkeyClient,
     common::opt,
     error::LabkeyError,
-    security::{Container, ContainerHierarchy},
+    security::{Container, ContainerHierarchy, FolderType, ModuleInfo},
 };
 
 /// Options for [`LabkeyClient::create_container`].
@@ -76,6 +78,85 @@ pub struct GetContainersOptions {
     pub module_properties: Option<Vec<String>>,
 }
 
+/// Options for [`LabkeyClient::get_readable_containers`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct GetReadableContainersOptions {
+    /// Optional container id or full path list; only the first value is sent.
+    pub container: Option<Vec<String>>,
+    /// Optional container override to run the request under.
+    pub container_path: Option<String>,
+    /// Optional recursion depth when `include_subfolders` is true.
+    pub depth: Option<i32>,
+    /// Include descendant containers.
+    pub include_subfolders: Option<bool>,
+}
+
+/// Options for [`LabkeyClient::get_folder_types`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct GetFolderTypesOptions {
+    /// Optional container override for the request.
+    pub container_path: Option<String>,
+}
+
+/// Response type for [`LabkeyClient::get_folder_types`].
+#[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
+pub struct GetFolderTypesResponse {
+    /// Folder types keyed by folder type name.
+    #[serde(flatten)]
+    pub folder_types: HashMap<String, FolderType>,
+}
+
+/// Options for [`LabkeyClient::get_modules`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct GetModulesOptions {
+    /// Optional container override for the request.
+    pub container_path: Option<String>,
+}
+
+/// Response type for [`LabkeyClient::get_modules`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct GetModulesResponse {
+    /// Folder type associated with the request container.
+    #[serde(default)]
+    pub folder_type: Option<String>,
+    /// Installed modules for this server/container context.
+    #[serde(default)]
+    pub modules: Vec<ModuleInfo>,
+}
+
+/// Options for [`LabkeyClient::move_container`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct MoveContainerOptions {
+    /// Optional URL container override; defaults to `container`.
+    pub container_path: Option<String>,
+    /// Current container path or id of the container to move.
+    pub container: String,
+    /// Destination parent path or id.
+    pub parent: String,
+    /// Whether to add an alias from the old path.
+    pub add_alias: Option<bool>,
+}
+
+/// Response type for [`LabkeyClient::move_container`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct MoveContainerResponse {
+    /// Server-provided success flag when present.
+    #[serde(default)]
+    pub success: Option<bool>,
+    /// Additional endpoint-specific response fields.
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateContainerBody {
@@ -107,10 +188,28 @@ struct RenameContainerBody {
     add_alias: Option<bool>,
 }
 
+#[derive(Debug, Serialize, Default)]
+struct EmptyPostBody {}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MoveContainerBody {
+    container: String,
+    parent: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    add_alias: Option<bool>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GetContainersEnvelope {
     containers: Vec<ContainerHierarchy>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetReadableContainersEnvelope {
+    containers: Vec<String>,
 }
 
 fn build_get_containers_params(options: &GetContainersOptions) -> Vec<(String, String)> {
@@ -187,10 +286,53 @@ fn extract_containers(
         })
 }
 
+fn build_get_readable_containers_params(
+    options: &GetReadableContainersOptions,
+) -> Vec<(String, String)> {
+    let mut params: Vec<(String, String)> = [
+        opt("includeSubfolders", options.include_subfolders),
+        opt("depth", options.depth),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    if let Some(first_container) = options.container.as_ref().and_then(|values| values.first()) {
+        params.push(("container".to_string(), first_container.clone()));
+    }
+
+    params
+}
+
+fn extract_readable_containers(response: &serde_json::Value) -> Result<Vec<String>, LabkeyError> {
+    serde_json::from_value::<GetReadableContainersEnvelope>(response.clone())
+        .map(|envelope| envelope.containers)
+        .map_err(|_| LabkeyError::UnexpectedResponse {
+            status: StatusCode::OK,
+            text: format!("invalid getReadableContainers response: {response}"),
+        })
+}
+
 fn validate_rename_input(name: Option<&str>, title: Option<&str>) -> Result<(), LabkeyError> {
     if name.is_none() && title.is_none() {
         return Err(LabkeyError::InvalidInput(
             "rename_container requires at least one of `name` or `title`".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_move_container_input(
+    container: &str,
+    container_path: Option<&str>,
+) -> Result<(), LabkeyError> {
+    if let Some(path) = container_path
+        && path != container
+    {
+        return Err(LabkeyError::InvalidInput(
+            "move_container requires `container_path` to match `container` when provided"
+                .to_string(),
         ));
     }
 
@@ -405,6 +547,187 @@ impl LabkeyClient {
         let response: serde_json::Value = self.get(url, &params).await?;
         extract_containers(&response)
     }
+
+    /// Retrieve container paths readable by the current user.
+    ///
+    /// Sends a GET request to `project-getReadableContainers.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the request fails, the server returns an
+    /// error response, or the response does not include a valid `containers`
+    /// array.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::security::GetReadableContainersOptions;
+    ///
+    /// let containers = client
+    ///     .get_readable_containers(
+    ///         GetReadableContainersOptions::builder()
+    ///             .container(vec!["/Home".to_string()])
+    ///             .include_subfolders(true)
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("Readable containers: {}", containers.len());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_readable_containers(
+        &self,
+        options: GetReadableContainersOptions,
+    ) -> Result<Vec<String>, LabkeyError> {
+        let url = self.build_url(
+            "project",
+            "getReadableContainers.api",
+            options.container_path.as_deref(),
+        );
+        let params = build_get_readable_containers_params(&options);
+        let response: serde_json::Value = self.get(url, &params).await?;
+        extract_readable_containers(&response)
+    }
+
+    /// Retrieve available folder types for the server.
+    ///
+    /// Sends a POST request to `core-getFolderTypes.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the request fails, the server returns an
+    /// error response, or the response body cannot be deserialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::security::GetFolderTypesOptions;
+    ///
+    /// let folder_types = client
+    ///     .get_folder_types(GetFolderTypesOptions::builder().build())
+    ///     .await?;
+    ///
+    /// println!("Folder types: {}", folder_types.folder_types.len());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_folder_types(
+        &self,
+        options: GetFolderTypesOptions,
+    ) -> Result<GetFolderTypesResponse, LabkeyError> {
+        let url = self.build_url(
+            "core",
+            "getFolderTypes.api",
+            options.container_path.as_deref(),
+        );
+        self.post(url, &EmptyPostBody::default()).await
+    }
+
+    /// Retrieve installed modules and module state metadata.
+    ///
+    /// Sends a POST request to `admin-getModules.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the request fails, the server returns an
+    /// error response, or the response body cannot be deserialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::security::GetModulesOptions;
+    ///
+    /// let modules = client
+    ///     .get_modules(GetModulesOptions::builder().build())
+    ///     .await?;
+    ///
+    /// println!("Modules: {}", modules.modules.len());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_modules(
+        &self,
+        options: GetModulesOptions,
+    ) -> Result<GetModulesResponse, LabkeyError> {
+        let url = self.build_url("admin", "getModules.api", options.container_path.as_deref());
+        self.post(url, &EmptyPostBody::default()).await
+    }
+
+    /// Move a container under a new parent container.
+    ///
+    /// Sends a POST request to `core-moveContainer.api`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the request fails, the server returns an
+    /// error response, or the response body cannot be deserialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::security::MoveContainerOptions;
+    ///
+    /// let response = client
+    ///     .move_container(
+    ///         MoveContainerOptions::builder()
+    ///             .container("/Home/OldProject".to_string())
+    ///             .parent("/Home/NewParent".to_string())
+    ///             .add_alias(true)
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("Move success: {:?}", response.success);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn move_container(
+        &self,
+        options: MoveContainerOptions,
+    ) -> Result<MoveContainerResponse, LabkeyError> {
+        validate_move_container_input(&options.container, options.container_path.as_deref())?;
+
+        let request_container_path = options
+            .container_path
+            .as_deref()
+            .unwrap_or(options.container.as_str());
+        let url = self.build_url("core", "moveContainer.api", Some(request_container_path));
+        let body = MoveContainerBody {
+            container: options.container,
+            parent: options.parent,
+            add_alias: options.add_alias,
+        };
+        self.post(url, &body).await
+    }
 }
 
 #[cfg(test)]
@@ -449,6 +772,34 @@ mod tests {
                 .as_str(),
             "https://labkey.example.com/labkey/Alt/Container/project-getContainers.api"
         );
+        assert_eq!(
+            client
+                .build_url(
+                    "project",
+                    "getReadableContainers.api",
+                    Some("/Alt/Container")
+                )
+                .as_str(),
+            "https://labkey.example.com/labkey/Alt/Container/project-getReadableContainers.api"
+        );
+        assert_eq!(
+            client
+                .build_url("core", "getFolderTypes.api", Some("/Alt/Container"))
+                .as_str(),
+            "https://labkey.example.com/labkey/Alt/Container/core-getFolderTypes.api"
+        );
+        assert_eq!(
+            client
+                .build_url("admin", "getModules.api", Some("/Alt/Container"))
+                .as_str(),
+            "https://labkey.example.com/labkey/Alt/Container/admin-getModules.api"
+        );
+        assert_eq!(
+            client
+                .build_url("core", "moveContainer.api", Some("/Source/Folder"))
+                .as_str(),
+            "https://labkey.example.com/labkey/Source/Folder/core-moveContainer.api"
+        );
     }
 
     #[test]
@@ -487,12 +838,44 @@ mod tests {
     }
 
     #[test]
+    fn move_container_body_serializes_required_and_optional_fields() {
+        let body = MoveContainerBody {
+            container: "/Home/Source".to_string(),
+            parent: "/Home/Target".to_string(),
+            add_alias: Some(false),
+        };
+
+        let value = serde_json::to_value(body).expect("should serialize");
+        assert_eq!(
+            value.get("container"),
+            Some(&serde_json::json!("/Home/Source"))
+        );
+        assert_eq!(
+            value.get("parent"),
+            Some(&serde_json::json!("/Home/Target"))
+        );
+        assert_eq!(value.get("addAlias"), Some(&serde_json::json!(false)));
+    }
+
+    #[test]
     fn rename_container_requires_name_or_title() {
         let error = validate_rename_input(None, None).expect_err("rename should fail");
         assert!(matches!(
             error,
             LabkeyError::InvalidInput(message)
                 if message == "rename_container requires at least one of `name` or `title`"
+        ));
+    }
+
+    #[test]
+    fn move_container_rejects_mismatched_container_and_container_path() {
+        let error = validate_move_container_input("/Home/Source", Some("/Home/Other"))
+            .expect_err("mismatched container path should fail");
+        assert!(matches!(
+            error,
+            LabkeyError::InvalidInput(message)
+                if message
+                    == "move_container requires `container_path` to match `container` when provided"
         ));
     }
 
@@ -561,6 +944,111 @@ mod tests {
         let containers = extract_containers(&response).expect("envelope response should parse");
         assert_eq!(containers.len(), 2);
         assert_eq!(containers[1].id.as_deref(), Some("c2"));
+    }
+
+    #[test]
+    fn get_readable_containers_params_uses_first_container_and_optionals() {
+        let options = GetReadableContainersOptions::builder()
+            .container(vec!["/Home".to_string(), "/Home/Project".to_string()])
+            .include_subfolders(true)
+            .depth(2)
+            .build();
+
+        let params = build_get_readable_containers_params(&options);
+
+        assert!(params.contains(&("container".to_string(), "/Home".to_string())));
+        assert!(!params.contains(&("container".to_string(), "/Home/Project".to_string())));
+        assert!(params.contains(&("includeSubfolders".to_string(), "true".to_string())));
+        assert!(params.contains(&("depth".to_string(), "2".to_string())));
+    }
+
+    #[test]
+    fn extract_readable_containers_returns_paths_from_envelope() {
+        let response = serde_json::json!({
+            "containers": ["/Home", "/Home/Project"]
+        });
+
+        let containers =
+            extract_readable_containers(&response).expect("readable containers should parse");
+        assert_eq!(containers, vec!["/Home", "/Home/Project"]);
+    }
+
+    #[test]
+    fn extract_readable_containers_rejects_missing_envelope() {
+        let response = serde_json::json!({
+            "paths": ["/Home"]
+        });
+
+        let error =
+            extract_readable_containers(&response).expect_err("missing envelope should fail");
+        assert!(matches!(error, LabkeyError::UnexpectedResponse { .. }));
+    }
+
+    #[test]
+    fn extract_readable_containers_rejects_non_array_envelope() {
+        let response = serde_json::json!({
+            "containers": "invalid"
+        });
+
+        let error =
+            extract_readable_containers(&response).expect_err("non-array envelope should fail");
+        assert!(matches!(error, LabkeyError::UnexpectedResponse { .. }));
+    }
+
+    #[test]
+    fn get_folder_types_response_deserializes_schema_keyed_map() {
+        let response = serde_json::json!({
+            "Study": {
+                "name": "Study",
+                "label": "Study Folder",
+                "webParts": []
+            },
+            "Collaboration": {
+                "name": "Collaboration",
+                "label": "Collaboration Folder",
+                "webParts": []
+            }
+        });
+
+        let folder_types: GetFolderTypesResponse =
+            serde_json::from_value(response).expect("folder types response should parse");
+        assert_eq!(folder_types.folder_types.len(), 2);
+        assert_eq!(
+            folder_types
+                .folder_types
+                .get("Study")
+                .expect("study should exist")
+                .name,
+            "Study"
+        );
+    }
+
+    #[test]
+    fn get_modules_response_deserializes_with_nested_module_info() {
+        let response = serde_json::json!({
+            "folderType": "Collaboration",
+            "modules": [
+                {"name": "core", "properties": []},
+                {"name": "query", "properties": [{"name": "version", "value": "1"}]}
+            ]
+        });
+
+        let modules: GetModulesResponse =
+            serde_json::from_value(response).expect("modules response should parse");
+        assert_eq!(modules.folder_type.as_deref(), Some("Collaboration"));
+        assert_eq!(modules.modules.len(), 2);
+        assert_eq!(modules.modules[1].name, "query");
+        assert_eq!(modules.modules[1].properties[0].name, "version");
+    }
+
+    #[test]
+    fn get_modules_response_deserializes_minimal_defaults() {
+        let response = serde_json::json!({});
+
+        let modules: GetModulesResponse =
+            serde_json::from_value(response).expect("minimal modules response should parse");
+        assert!(modules.folder_type.is_none());
+        assert!(modules.modules.is_empty());
     }
 
     #[test]
