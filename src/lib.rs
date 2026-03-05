@@ -27,6 +27,7 @@ pub mod client;
 pub mod common;
 pub mod domain;
 pub mod error;
+pub mod experiment;
 pub mod filter;
 pub mod query;
 pub mod security;

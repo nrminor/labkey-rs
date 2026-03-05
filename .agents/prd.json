@@ -417,8 +417,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 21,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented US-021 by adding src/experiment.rs and exporting pub mod experiment in src/lib.rs, plus adding src/experiment.rs to the .gitignore allow list. Added non-exhaustive typed experiment models ExpObject, RunGroup, Run, ExpData, Material, LineageNode, LineageEdge, PkFilter, DataClassRef, and SampleSetRef with derive sets matched to usage (Serialize/Deserialize for shared request-response entities, Deserialize for response-only lineage graph types). Added non-exhaustive ExpType and SeqType enums with explicit serde wire mappings and regression coverage for full round-trip and variant-count behavior. Implemented LabkeyClient::lineage (GET experiment-lineage.api) and LabkeyClient::resolve (GET experiment-resolve.api) with declarative opt-based GET param shaping, repeated lsid parameter support for multi-LSID requests, deprecated single-lsid lineage behavior, and private response.data envelope extraction for resolve mapped to LabkeyError::UnexpectedResponse on malformed/missing envelopes. Added client-side InvalidInput validation for lineage/resolve LSID inputs (missing/conflicting/blank). Added endpoint rustdocs with # Errors and no_run # Example sections. Expanded inline unit coverage for LineageNode and LineageResponse deserialization, lineage and resolve parameter construction semantics, single-LSID lineage edge behavior, endpoint URL routing, resolve envelope success/error extraction, and validation failure paths. Solicited feedback from nick-isms/testing-guru/semver-nag, incorporated follow-up improvements, and verified all quality gates with just check before and after review-driven updates."
     },
     {
       "id": "US-022",

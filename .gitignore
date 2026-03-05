@@ -28,6 +28,7 @@
 !/src/client.rs
 !/src/common.rs
 !/src/domain.rs
+!/src/experiment.rs
 !/src/filter.rs
 !/src/query.rs
 !/src/security
