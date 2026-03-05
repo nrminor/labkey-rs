@@ -1901,6 +1901,37 @@ mod tests {
         }
     }
 
+    #[test]
+    fn entity_kind_name_round_trips_all_variants() {
+        let variants = [EntityKindName::DataClass, EntityKindName::SampleSet];
+
+        for variant in variants {
+            let json = serde_json::to_string(&variant).expect("serialize entity kind");
+            let restored: EntityKindName =
+                serde_json::from_str(&json).expect("deserialize entity kind");
+            assert_eq!(restored, variant);
+        }
+    }
+
+    #[test]
+    fn entity_kind_name_serializes_exact_wire_values() {
+        assert_eq!(
+            serde_json::to_string(&EntityKindName::DataClass).expect("serialize entity kind"),
+            "\"DataClass\""
+        );
+        assert_eq!(
+            serde_json::to_string(&EntityKindName::SampleSet).expect("serialize entity kind"),
+            "\"SampleSet\""
+        );
+    }
+
+    #[test]
+    fn entity_kind_name_rejects_unknown_wire_value() {
+        let err = serde_json::from_str::<EntityKindName>("\"UnknownKind\"")
+            .expect_err("unknown entity kind should fail to deserialize");
+        assert!(err.is_data());
+    }
+
     fn exp_type_variant_count(value: ExpType) -> usize {
         match value {
             ExpType::Data | ExpType::Material | ExpType::ExperimentRun => 3,
@@ -1913,6 +1944,12 @@ mod tests {
         }
     }
 
+    fn entity_kind_name_variant_count(value: EntityKindName) -> usize {
+        match value {
+            EntityKindName::DataClass | EntityKindName::SampleSet => 2,
+        }
+    }
+
     #[test]
     fn exp_type_variant_count_regression() {
         assert_eq!(exp_type_variant_count(ExpType::Data), 3);
@@ -1921,6 +1958,11 @@ mod tests {
     #[test]
     fn seq_type_variant_count_regression() {
         assert_eq!(seq_type_variant_count(SeqType::GenId), 3);
+    }
+
+    #[test]
+    fn entity_kind_name_variant_count_regression() {
+        assert_eq!(entity_kind_name_variant_count(EntityKindName::DataClass), 2);
     }
 
     #[test]
