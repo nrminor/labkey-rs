@@ -499,8 +499,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 25,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented US-025 in src/assay.rs by adding ImportRunOptions, ImportRunSource, and ImportRunResponse with non-exhaustive conventions and a new LabkeyClient::import_run endpoint targeting assay-importRun.api via post_multipart. Added mode-specific multipart shaping with default use_json=false semantics: non-JSON mode emits typed multipart parts using Part::text plus binary file parts with application/octet-stream, source-specific field names (file/runFilePath/dataRows), and bracket-notation property keys properties[key] and batchProperties[key]; JSON mode emits exactly one json text part containing a full payload object with source metadata/data. Added client-side input validation for assay_id and source payload invariants (non-empty filename/path/dataRows and non-empty file bytes) returning LabkeyError::InvalidInput before transport. Expanded inline assay tests for URL routing, multipart shape in both modes, source-variant field mapping, ImportRunResponse happy/minimal deserialization, explicit use_json=false parity with default behavior, and invalid-input coverage. Solicited feedback from nick-isms/testing-guru/semver-nag, incorporated must-fix follow-ups (validation and variant-level non_exhaustive on File source), and verified all quality gates with just check before and after review changes."
     },
     {
       "id": "US-026",

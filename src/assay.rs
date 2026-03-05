@@ -372,6 +372,90 @@ pub struct GetAssayRunOptions {
     pub container_path: Option<String>,
 }
 
+/// Source payload variants for [`LabkeyClient::import_run`].
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum ImportRunSource {
+    /// Upload run data as file bytes.
+    #[non_exhaustive]
+    File {
+        /// Raw file bytes.
+        data: Vec<u8>,
+        /// File name sent to the server.
+        filename: String,
+    },
+    /// Import from a server-side run file path.
+    RunFilePath(String),
+    /// Import inline row data.
+    DataRows(Vec<serde_json::Value>),
+}
+
+/// Options for [`LabkeyClient::import_run`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct ImportRunOptions {
+    /// Assay id to import into.
+    pub assay_id: i64,
+    /// Exactly one run input mode.
+    pub source: ImportRunSource,
+    /// Override the client's default container path for this request.
+    pub container_path: Option<String>,
+    /// Optional run name.
+    pub name: Option<String>,
+    /// Optional run comment.
+    pub comment: Option<String>,
+    /// Optional existing batch id.
+    pub batch_id: Option<i64>,
+    /// Optional rerun id.
+    pub re_run_id: Option<i64>,
+    /// Optional save-data-as-file flag.
+    pub save_data_as_file: Option<bool>,
+    /// Optional save-only-matching-columns flag.
+    pub save_matching_column_data_only: Option<bool>,
+    /// Optional async job description.
+    pub job_description: Option<String>,
+    /// Optional async job notification provider.
+    pub job_notification_provider: Option<String>,
+    /// Optional force-async flag.
+    pub force_async: Option<bool>,
+    /// Optional cross-run file-input flag.
+    pub allow_cross_run_file_inputs: Option<bool>,
+    /// Optional workflow task id.
+    pub workflow_task: Option<i64>,
+    /// Optional alternate-key lookup flag.
+    pub allow_lookup_by_alternate_key: Option<bool>,
+    /// Optional audit user comment.
+    pub audit_user_comment: Option<String>,
+    /// Optional structured audit details.
+    pub audit_details: Option<serde_json::Value>,
+    /// Optional run-level properties.
+    pub properties: Option<HashMap<String, serde_json::Value>>,
+    /// Optional batch-level properties.
+    pub batch_properties: Option<HashMap<String, serde_json::Value>>,
+    /// Optional plate metadata payload.
+    pub plate_metadata: Option<serde_json::Value>,
+    /// Optional JSON payload mode. Defaults to `false` when unset.
+    pub use_json: Option<bool>,
+}
+
+/// Response from [`LabkeyClient::import_run`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct ImportRunResponse {
+    /// Whether the import request was accepted.
+    pub success: bool,
+    /// Imported run id when available.
+    #[serde(default)]
+    pub run_id: Option<i64>,
+    /// Imported batch id when available.
+    #[serde(default)]
+    pub batch_id: Option<i64>,
+    /// Pipeline job id for async imports.
+    #[serde(default)]
+    pub job_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct GetAssaysResponse {
     definitions: Vec<AssayDesign>,
@@ -412,6 +496,19 @@ struct GetAssaysParameters {
 #[derive(Debug, Clone, Serialize)]
 struct GetAssayRunBody {
     lsid: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ImportRunPart {
+    Text {
+        name: String,
+        value: String,
+    },
+    File {
+        name: String,
+        filename: String,
+        data: Vec<u8>,
+    },
 }
 
 impl LabkeyClient {
@@ -755,6 +852,60 @@ impl LabkeyClient {
         let body = GetAssayRunBody { lsid: options.lsid };
         self.post(url, &body).await
     }
+
+    /// Import an assay run using multipart upload modes.
+    ///
+    /// Sends a POST request to `assay-importRun.api` with multipart payload
+    /// encoding. When `use_json` is unset or `false`, parameters are emitted as
+    /// individual parts, including bracket-notation property keys
+    /// (`properties[key]` and `batchProperties[key]`). When `use_json` is
+    /// `true`, the request sends exactly one `json` part with the full payload.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if multipart body construction fails, the HTTP
+    /// request fails, the server returns an error response, or the response body
+    /// cannot be deserialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::assay::{ImportRunOptions, ImportRunSource};
+    ///
+    /// let response = client
+    ///     .import_run(
+    ///         ImportRunOptions::builder()
+    ///             .assay_id(42)
+    ///             .source(ImportRunSource::RunFilePath(
+    ///                 "/files/assays/run1.tsv".to_string(),
+    ///             ))
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("{}", response.success);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn import_run(
+        &self,
+        options: ImportRunOptions,
+    ) -> Result<ImportRunResponse, LabkeyError> {
+        validate_import_run_options(&options)?;
+        let url = self.build_url("assay", "importRun.api", options.container_path.as_deref());
+        let parts = build_import_run_parts(&options);
+        let form = build_import_run_form(parts)?;
+
+        self.post_multipart(url, form, &RequestOptions::default())
+            .await
+    }
 }
 
 fn build_get_assays_body(options: &GetAssaysOptions) -> GetAssaysBody {
@@ -823,6 +974,371 @@ fn validate_get_assay_run_options(options: &GetAssayRunOptions) -> Result<(), La
         ));
     }
     Ok(())
+}
+
+fn validate_import_run_options(options: &ImportRunOptions) -> Result<(), LabkeyError> {
+    if options.assay_id <= 0 {
+        return Err(LabkeyError::InvalidInput(
+            "import_run requires assay_id to be greater than zero".to_string(),
+        ));
+    }
+
+    match &options.source {
+        ImportRunSource::File { data, filename } => {
+            if filename.trim().is_empty() {
+                return Err(LabkeyError::InvalidInput(
+                    "import_run file source requires a non-empty filename".to_string(),
+                ));
+            }
+            if data.is_empty() {
+                return Err(LabkeyError::InvalidInput(
+                    "import_run file source requires non-empty file data".to_string(),
+                ));
+            }
+        }
+        ImportRunSource::RunFilePath(path) => {
+            if path.trim().is_empty() {
+                return Err(LabkeyError::InvalidInput(
+                    "import_run run_file_path source requires a non-empty path".to_string(),
+                ));
+            }
+        }
+        ImportRunSource::DataRows(rows) => {
+            if rows.is_empty() {
+                return Err(LabkeyError::InvalidInput(
+                    "import_run data_rows source requires at least one row".to_string(),
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn build_import_run_parts(options: &ImportRunOptions) -> Vec<ImportRunPart> {
+    if options.use_json.unwrap_or(false) {
+        return vec![ImportRunPart::Text {
+            name: "json".to_string(),
+            value: build_import_run_json_payload(options).to_string(),
+        }];
+    }
+
+    let mut parts = vec![ImportRunPart::Text {
+        name: "assayId".to_string(),
+        value: options.assay_id.to_string(),
+    }];
+
+    append_import_run_common_parts(&mut parts, options);
+
+    match &options.source {
+        ImportRunSource::File { data, filename } => parts.push(ImportRunPart::File {
+            name: "file".to_string(),
+            filename: filename.clone(),
+            data: data.clone(),
+        }),
+        ImportRunSource::RunFilePath(path) => {
+            push_optional_part(&mut parts, "runFilePath", Some(path.clone()));
+        }
+        ImportRunSource::DataRows(rows) => {
+            push_optional_part(
+                &mut parts,
+                "dataRows",
+                Some(serde_json::Value::Array(rows.clone()).to_string()),
+            );
+        }
+    }
+
+    parts
+}
+
+fn append_import_run_common_parts(parts: &mut Vec<ImportRunPart>, options: &ImportRunOptions) {
+    push_optional_part(parts, "name", options.name.clone());
+    push_optional_part(parts, "comment", options.comment.clone());
+    push_optional_part(
+        parts,
+        "batchId",
+        options.batch_id.map(|value| value.to_string()),
+    );
+    push_optional_part(
+        parts,
+        "reRunId",
+        options.re_run_id.map(|value| value.to_string()),
+    );
+    push_optional_part(
+        parts,
+        "saveDataAsFile",
+        options.save_data_as_file.map(|value| value.to_string()),
+    );
+    push_optional_part(
+        parts,
+        "saveMatchingColumnDataOnly",
+        options
+            .save_matching_column_data_only
+            .map(|value| value.to_string()),
+    );
+    push_optional_part(parts, "jobDescription", options.job_description.clone());
+    push_optional_part(
+        parts,
+        "jobNotificationProvider",
+        options.job_notification_provider.clone(),
+    );
+    push_optional_part(
+        parts,
+        "forceAsync",
+        options.force_async.map(|value| value.to_string()),
+    );
+    push_optional_part(
+        parts,
+        "allowCrossRunFileInputs",
+        options
+            .allow_cross_run_file_inputs
+            .map(|value| value.to_string()),
+    );
+    push_optional_part(
+        parts,
+        "workflowTask",
+        options.workflow_task.map(|value| value.to_string()),
+    );
+    push_optional_part(
+        parts,
+        "allowLookupByAlternateKey",
+        options
+            .allow_lookup_by_alternate_key
+            .map(|value| value.to_string()),
+    );
+    push_optional_part(
+        parts,
+        "auditUserComment",
+        options.audit_user_comment.clone(),
+    );
+    push_optional_part(
+        parts,
+        "auditDetails",
+        options
+            .audit_details
+            .as_ref()
+            .map(serde_json::Value::to_string),
+    );
+
+    if let Some(properties) = &options.properties {
+        append_property_parts(parts, "properties", properties);
+    }
+    if let Some(batch_properties) = &options.batch_properties {
+        append_property_parts(parts, "batchProperties", batch_properties);
+    }
+
+    push_optional_part(
+        parts,
+        "plateMetadata",
+        options
+            .plate_metadata
+            .as_ref()
+            .map(serde_json::Value::to_string),
+    );
+}
+
+fn build_import_run_json_payload(options: &ImportRunOptions) -> serde_json::Value {
+    let mut payload = serde_json::Map::new();
+    payload.insert(
+        "assayId".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(options.assay_id)),
+    );
+    payload.insert("useJson".to_string(), serde_json::Value::Bool(true));
+
+    insert_optional_json_string(&mut payload, "name", options.name.clone());
+    insert_optional_json_string(&mut payload, "comment", options.comment.clone());
+    insert_optional_json_i64(&mut payload, "batchId", options.batch_id);
+    insert_optional_json_i64(&mut payload, "reRunId", options.re_run_id);
+    insert_optional_json_bool(&mut payload, "saveDataAsFile", options.save_data_as_file);
+    insert_optional_json_bool(
+        &mut payload,
+        "saveMatchingColumnDataOnly",
+        options.save_matching_column_data_only,
+    );
+    insert_optional_json_string(
+        &mut payload,
+        "jobDescription",
+        options.job_description.clone(),
+    );
+    insert_optional_json_string(
+        &mut payload,
+        "jobNotificationProvider",
+        options.job_notification_provider.clone(),
+    );
+    insert_optional_json_bool(&mut payload, "forceAsync", options.force_async);
+    insert_optional_json_bool(
+        &mut payload,
+        "allowCrossRunFileInputs",
+        options.allow_cross_run_file_inputs,
+    );
+    insert_optional_json_i64(&mut payload, "workflowTask", options.workflow_task);
+    insert_optional_json_bool(
+        &mut payload,
+        "allowLookupByAlternateKey",
+        options.allow_lookup_by_alternate_key,
+    );
+    insert_optional_json_string(
+        &mut payload,
+        "auditUserComment",
+        options.audit_user_comment.clone(),
+    );
+    insert_optional_json_value(&mut payload, "auditDetails", options.audit_details.clone());
+    insert_optional_json_value(
+        &mut payload,
+        "properties",
+        options
+            .properties
+            .clone()
+            .map(|value| serde_json::Value::Object(serde_json::Map::from_iter(value))),
+    );
+    insert_optional_json_value(
+        &mut payload,
+        "batchProperties",
+        options
+            .batch_properties
+            .clone()
+            .map(|value| serde_json::Value::Object(serde_json::Map::from_iter(value))),
+    );
+    insert_optional_json_value(
+        &mut payload,
+        "plateMetadata",
+        options.plate_metadata.clone(),
+    );
+
+    match &options.source {
+        ImportRunSource::File { data, filename } => {
+            payload.insert(
+                "file".to_string(),
+                serde_json::json!({"filename": filename, "data": data}),
+            );
+        }
+        ImportRunSource::RunFilePath(path) => {
+            payload.insert(
+                "runFilePath".to_string(),
+                serde_json::Value::String(path.clone()),
+            );
+        }
+        ImportRunSource::DataRows(rows) => {
+            payload.insert(
+                "dataRows".to_string(),
+                serde_json::Value::Array(rows.clone()),
+            );
+        }
+    }
+
+    serde_json::Value::Object(payload)
+}
+
+fn build_import_run_form(
+    parts: Vec<ImportRunPart>,
+) -> Result<reqwest::multipart::Form, LabkeyError> {
+    let mut form = reqwest::multipart::Form::new();
+    for part in parts {
+        match part {
+            ImportRunPart::Text { name, value } => {
+                form = form.part(name, reqwest::multipart::Part::text(value));
+            }
+            ImportRunPart::File {
+                name,
+                filename,
+                data,
+            } => {
+                let part = reqwest::multipart::Part::bytes(data)
+                    .file_name(filename)
+                    .mime_str("application/octet-stream")
+                    .map_err(|error| {
+                        LabkeyError::InvalidInput(format!(
+                            "failed to build import_run file part: {error}"
+                        ))
+                    })?;
+                form = form.part(name, part);
+            }
+        }
+    }
+
+    Ok(form)
+}
+
+fn append_property_parts(
+    parts: &mut Vec<ImportRunPart>,
+    prefix: &str,
+    properties: &HashMap<String, serde_json::Value>,
+) {
+    for (key, value) in properties {
+        if value.is_null() {
+            continue;
+        }
+
+        let part_name = format!("{prefix}[{key}]");
+        let part_value = property_value_to_string(value);
+        parts.push(ImportRunPart::Text {
+            name: part_name,
+            value: part_value,
+        });
+    }
+}
+
+fn property_value_to_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Bool(_)
+        | serde_json::Value::Number(_)
+        | serde_json::Value::Array(_)
+        | serde_json::Value::Object(_)
+        | serde_json::Value::Null => value.to_string(),
+    }
+}
+
+fn push_optional_part(parts: &mut Vec<ImportRunPart>, name: &str, value: Option<String>) {
+    if let Some(value) = value {
+        parts.push(ImportRunPart::Text {
+            name: name.to_string(),
+            value,
+        });
+    }
+}
+
+fn insert_optional_json_string(
+    payload: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: Option<String>,
+) {
+    if let Some(value) = value {
+        payload.insert(key.to_string(), serde_json::Value::String(value));
+    }
+}
+
+fn insert_optional_json_bool(
+    payload: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: Option<bool>,
+) {
+    if let Some(value) = value {
+        payload.insert(key.to_string(), serde_json::Value::Bool(value));
+    }
+}
+
+fn insert_optional_json_i64(
+    payload: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: Option<i64>,
+) {
+    if let Some(value) = value {
+        payload.insert(
+            key.to_string(),
+            serde_json::Value::Number(serde_json::Number::from(value)),
+        );
+    }
+}
+
+fn insert_optional_json_value(
+    payload: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: Option<serde_json::Value>,
+) {
+    if let Some(value) = value {
+        payload.insert(key.to_string(), value);
+    }
 }
 
 fn validate_object_ids(endpoint: &str, object_ids: &[String]) -> Result<(), LabkeyError> {
@@ -938,6 +1454,7 @@ mod tests {
             ("assay", "getProtocol"),
             ("assay", "saveProtocol"),
             ("assay", "getAssayRun"),
+            ("assay", "importRun.api"),
         ];
 
         for (controller, action) in cases {
@@ -1420,5 +1937,264 @@ mod tests {
             LabkeyError::InvalidInput(message) => assert!(message.contains("lsid")),
             other => panic!("expected invalid input, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn import_run_response_deserializes_happy_path() {
+        let value = serde_json::json!({
+            "success": true,
+            "runId": 31,
+            "batchId": 12,
+            "jobId": "job-42"
+        });
+
+        let response: ImportRunResponse =
+            serde_json::from_value(value).expect("deserialize import run response");
+        assert!(response.success);
+        assert_eq!(response.run_id, Some(31));
+        assert_eq!(response.batch_id, Some(12));
+        assert_eq!(response.job_id.as_deref(), Some("job-42"));
+    }
+
+    #[test]
+    fn import_run_response_deserializes_minimal_path() {
+        let value = serde_json::json!({"success": true});
+
+        let response: ImportRunResponse =
+            serde_json::from_value(value).expect("deserialize minimal import run response");
+        assert!(response.success);
+        assert!(response.run_id.is_none());
+        assert!(response.batch_id.is_none());
+        assert!(response.job_id.is_none());
+    }
+
+    #[test]
+    fn import_run_non_json_mode_uses_expected_part_names_and_bracket_keys() {
+        let options = ImportRunOptions::builder()
+            .assay_id(7)
+            .source(ImportRunSource::DataRows(vec![
+                serde_json::json!({"Name": "Alice"}),
+                serde_json::json!({"Name": "Bob"}),
+            ]))
+            .name("Run 1".to_string())
+            .properties(HashMap::from([
+                (
+                    "qc".to_string(),
+                    serde_json::Value::String("pass".to_string()),
+                ),
+                (
+                    "metadata".to_string(),
+                    serde_json::json!({"instrument": "A1"}),
+                ),
+            ]))
+            .batch_properties(HashMap::from([
+                (
+                    "batchFlag".to_string(),
+                    serde_json::Value::String("yes".to_string()),
+                ),
+                ("skip".to_string(), serde_json::Value::Null),
+            ]))
+            .build();
+
+        let parts = build_import_run_parts(&options);
+
+        assert!(parts.contains(&ImportRunPart::Text {
+            name: "assayId".to_string(),
+            value: "7".to_string(),
+        }));
+        assert!(parts.contains(&ImportRunPart::Text {
+            name: "name".to_string(),
+            value: "Run 1".to_string(),
+        }));
+        assert!(parts.contains(&ImportRunPart::Text {
+            name: "properties[qc]".to_string(),
+            value: "pass".to_string(),
+        }));
+        assert!(parts.iter().any(|part| {
+            matches!(
+                part,
+                ImportRunPart::Text { name, value }
+                if name == "properties[metadata]" && value.contains("instrument")
+            )
+        }));
+        assert!(parts.contains(&ImportRunPart::Text {
+            name: "batchProperties[batchFlag]".to_string(),
+            value: "yes".to_string(),
+        }));
+        assert!(!parts.iter().any(|part| {
+            matches!(
+                part,
+                ImportRunPart::Text { name, .. } if name == "batchProperties[skip]"
+            )
+        }));
+        assert!(parts.iter().any(|part| {
+            matches!(
+                part,
+                ImportRunPart::Text { name, value }
+                if name == "dataRows" && value.contains("Alice") && value.contains("Bob")
+            )
+        }));
+    }
+
+    #[test]
+    fn import_run_json_mode_uses_single_json_part() {
+        let options = ImportRunOptions::builder()
+            .assay_id(42)
+            .source(ImportRunSource::File {
+                data: b"A\tB\n1\t2".to_vec(),
+                filename: "run.tsv".to_string(),
+            })
+            .use_json(true)
+            .allow_lookup_by_alternate_key(true)
+            .build();
+
+        let parts = build_import_run_parts(&options);
+        assert_eq!(parts.len(), 1);
+
+        match &parts[0] {
+            ImportRunPart::Text { name, value } => {
+                assert_eq!(name, "json");
+                let payload: serde_json::Value =
+                    serde_json::from_str(value).expect("json payload should parse");
+                assert_eq!(payload["assayId"], 42);
+                assert_eq!(payload["useJson"], true);
+                assert_eq!(payload["allowLookupByAlternateKey"], true);
+                assert_eq!(payload["file"]["filename"], "run.tsv");
+                assert_eq!(
+                    payload["file"]["data"],
+                    serde_json::json!([65, 9, 66, 10, 49, 9, 50])
+                );
+            }
+            other @ ImportRunPart::File { .. } => {
+                panic!("expected single json text part, got {other:?}")
+            }
+        }
+    }
+
+    #[test]
+    fn import_run_source_variants_map_to_expected_part_names() {
+        let file_parts = build_import_run_parts(
+            &ImportRunOptions::builder()
+                .assay_id(1)
+                .source(ImportRunSource::File {
+                    data: vec![1, 2, 3],
+                    filename: "run.tsv".to_string(),
+                })
+                .build(),
+        );
+        assert!(file_parts.iter().any(|part| {
+            matches!(
+                part,
+                ImportRunPart::File { name, filename, .. }
+                if name == "file" && filename == "run.tsv"
+            )
+        }));
+
+        let path_parts = build_import_run_parts(
+            &ImportRunOptions::builder()
+                .assay_id(1)
+                .source(ImportRunSource::RunFilePath(
+                    "/files/assay/run-1.tsv".to_string(),
+                ))
+                .build(),
+        );
+        assert!(path_parts.contains(&ImportRunPart::Text {
+            name: "runFilePath".to_string(),
+            value: "/files/assay/run-1.tsv".to_string(),
+        }));
+
+        let data_rows_parts = build_import_run_parts(
+            &ImportRunOptions::builder()
+                .assay_id(1)
+                .source(ImportRunSource::DataRows(vec![
+                    serde_json::json!({"Name": "A"}),
+                ]))
+                .build(),
+        );
+        assert!(data_rows_parts.iter().any(|part| {
+            matches!(
+                part,
+                ImportRunPart::Text { name, value }
+                if name == "dataRows" && value.contains("Name")
+            )
+        }));
+    }
+
+    #[test]
+    fn import_run_validation_rejects_invalid_inputs() {
+        let invalid_assay_id = validate_import_run_options(
+            &ImportRunOptions::builder()
+                .assay_id(0)
+                .source(ImportRunSource::RunFilePath("/files/run.tsv".to_string()))
+                .build(),
+        )
+        .expect_err("zero assay_id should fail");
+        assert!(matches!(invalid_assay_id, LabkeyError::InvalidInput(_)));
+
+        let blank_filename = validate_import_run_options(
+            &ImportRunOptions::builder()
+                .assay_id(1)
+                .source(ImportRunSource::File {
+                    data: vec![1],
+                    filename: "   ".to_string(),
+                })
+                .build(),
+        )
+        .expect_err("blank filename should fail");
+        assert!(matches!(blank_filename, LabkeyError::InvalidInput(_)));
+
+        let empty_file_data = validate_import_run_options(
+            &ImportRunOptions::builder()
+                .assay_id(1)
+                .source(ImportRunSource::File {
+                    data: Vec::new(),
+                    filename: "run.tsv".to_string(),
+                })
+                .build(),
+        )
+        .expect_err("empty file bytes should fail");
+        assert!(matches!(empty_file_data, LabkeyError::InvalidInput(_)));
+
+        let blank_path = validate_import_run_options(
+            &ImportRunOptions::builder()
+                .assay_id(1)
+                .source(ImportRunSource::RunFilePath("   ".to_string()))
+                .build(),
+        )
+        .expect_err("blank runFilePath should fail");
+        assert!(matches!(blank_path, LabkeyError::InvalidInput(_)));
+
+        let empty_rows = validate_import_run_options(
+            &ImportRunOptions::builder()
+                .assay_id(1)
+                .source(ImportRunSource::DataRows(Vec::new()))
+                .build(),
+        )
+        .expect_err("empty dataRows should fail");
+        assert!(matches!(empty_rows, LabkeyError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn import_run_use_json_false_matches_default_multipart_mode() {
+        let default_mode = build_import_run_parts(
+            &ImportRunOptions::builder()
+                .assay_id(1)
+                .source(ImportRunSource::RunFilePath(
+                    "/files/assay/run.tsv".to_string(),
+                ))
+                .build(),
+        );
+
+        let explicit_false = build_import_run_parts(
+            &ImportRunOptions::builder()
+                .assay_id(1)
+                .source(ImportRunSource::RunFilePath(
+                    "/files/assay/run.tsv".to_string(),
+                ))
+                .use_json(false)
+                .build(),
+        );
+
+        assert_eq!(explicit_false, default_mode);
     }
 }
