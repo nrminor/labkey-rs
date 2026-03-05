@@ -517,8 +517,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 26,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed focused experiment/assay parity audit against upstream JS (`src/labkey/Experiment.ts`, `src/labkey/dom/Assay.ts`) and Java assay/experiment remote API sources (`assay/Protocol.java`, `assay/ImportRunCommand.java`, `experiment/LineageCommand.java`). Endpoint parity checklist: match = create_hidden_run_group, save_batch, save_batches, load_batch, load_batches, load_runs, save_runs, save_materials delegation, set_entity_sequence, get_entity_sequence, get_protocol/save_protocol/get_assay_run route semantics, AssayProtocol Java field coverage; mismatch fixed = (1) `lineage` plural seed encoding now uses repeated `lsids` query key (upstream JS/Java) while preserving deprecated singular `lsid` path for backwards compatibility, (2) `resolve` now uses repeated `lsids` query key (upstream JS/Java), (3) `import_run` JSON mode now emits multipart `json` part with `Content-Type: application/json` to match Java ImportRunCommand semantics. Deferred/non-critical documented mismatch = Rust import_run JSON payload continues to include `useJson: true` (tolerated by server) while Java payload includes `apiVersion`; no endpoint additions or broad refactors were made per scope guardrails. Added/updated tests to make parity expectations executable: updated unit assertions in `src/experiment.rs` for `lsids` key semantics and added integration tests in `tests/client_integration.rs` for lineage/resolve repeated `lsids` request contracts and import_run JSON-part content-type contract. Solicited feedback from nick-isms/testing-guru/semver-nag, incorporated test-rigor follow-ups, and verified all gates with just check before and after feedback-driven changes." 
     },
     {
       "id": "US-027",

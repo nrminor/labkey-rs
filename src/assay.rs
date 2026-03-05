@@ -504,6 +504,10 @@ enum ImportRunPart {
         name: String,
         value: String,
     },
+    Json {
+        name: String,
+        value: String,
+    },
     File {
         name: String,
         filename: String,
@@ -1017,7 +1021,7 @@ fn validate_import_run_options(options: &ImportRunOptions) -> Result<(), LabkeyE
 
 fn build_import_run_parts(options: &ImportRunOptions) -> Vec<ImportRunPart> {
     if options.use_json.unwrap_or(false) {
-        return vec![ImportRunPart::Text {
+        return vec![ImportRunPart::Json {
             name: "json".to_string(),
             value: build_import_run_json_payload(options).to_string(),
         }];
@@ -1237,6 +1241,16 @@ fn build_import_run_form(
         match part {
             ImportRunPart::Text { name, value } => {
                 form = form.part(name, reqwest::multipart::Part::text(value));
+            }
+            ImportRunPart::Json { name, value } => {
+                let json_part = reqwest::multipart::Part::text(value)
+                    .mime_str("application/json")
+                    .map_err(|error| {
+                        LabkeyError::InvalidInput(format!(
+                            "failed to build import_run json part: {error}"
+                        ))
+                    })?;
+                form = form.part(name, json_part);
             }
             ImportRunPart::File {
                 name,
@@ -2052,7 +2066,7 @@ mod tests {
         assert_eq!(parts.len(), 1);
 
         match &parts[0] {
-            ImportRunPart::Text { name, value } => {
+            ImportRunPart::Json { name, value } => {
                 assert_eq!(name, "json");
                 let payload: serde_json::Value =
                     serde_json::from_str(value).expect("json payload should parse");
@@ -2065,8 +2079,8 @@ mod tests {
                     serde_json::json!([65, 9, 66, 10, 49, 9, 50])
                 );
             }
-            other @ ImportRunPart::File { .. } => {
-                panic!("expected single json text part, got {other:?}")
+            other @ (ImportRunPart::Text { .. } | ImportRunPart::File { .. }) => {
+                panic!("expected single json part, got {other:?}")
             }
         }
     }

@@ -365,7 +365,7 @@ pub struct LineageOptions {
     pub run_protocol_lsid: Option<String>,
     /// Deprecated single seed LSID.
     pub lsid: Option<String>,
-    /// Seed LSIDs. When provided, these are emitted as repeated `lsid` params.
+    /// Seed LSIDs. When provided, these are emitted as repeated `lsids` params.
     pub lsids: Option<Vec<String>>,
     /// Include run and step inputs and outputs.
     pub include_inputs_and_outputs: Option<bool>,
@@ -381,7 +381,7 @@ pub struct LineageOptions {
 pub struct ResolveOptions {
     /// Optional container override for request routing.
     pub container_path: Option<String>,
-    /// LSIDs to resolve, emitted as repeated `lsid` query parameters.
+    /// LSIDs to resolve, emitted as repeated `lsids` query parameters.
     pub lsids: Option<Vec<String>>,
     /// Include run and step inputs and outputs.
     pub include_inputs_and_outputs: Option<bool>,
@@ -743,7 +743,7 @@ fn build_lineage_params(options: &LineageOptions) -> Vec<(String, String)> {
             lsids
                 .iter()
                 .cloned()
-                .map(|value| ("lsid".to_string(), value)),
+                .map(|value| ("lsids".to_string(), value)),
         );
     } else if let Some(lsid) = options.lsid.as_ref() {
         params.push(("lsid".to_string(), lsid.clone()));
@@ -770,7 +770,7 @@ fn build_resolve_params(options: &ResolveOptions) -> Vec<(String, String)> {
             lsids
                 .iter()
                 .cloned()
-                .map(|value| ("lsid".to_string(), value)),
+                .map(|value| ("lsids".to_string(), value)),
         );
     }
 
@@ -1753,7 +1753,7 @@ mod tests {
     }
 
     #[test]
-    fn lineage_params_include_repeated_lsid_and_exp_type_wire_value() {
+    fn lineage_params_include_repeated_lsids_and_exp_type_wire_value() {
         let options = LineageOptions::builder()
             .lsids(vec![
                 "urn:lsid:test:run-1".to_string(),
@@ -1767,10 +1767,10 @@ mod tests {
         assert!(params.contains(&("includeInputsAndOutputs".to_string(), "true".to_string())));
         assert!(params.contains(&("expType".to_string(), "ExperimentRun".to_string())));
 
-        let lsid_count = params.iter().filter(|(k, _)| k == "lsid").count();
-        assert_eq!(lsid_count, 2);
-        assert!(params.contains(&("lsid".to_string(), "urn:lsid:test:run-1".to_string())));
-        assert!(params.contains(&("lsid".to_string(), "urn:lsid:test:run-2".to_string())));
+        let lsids_count = params.iter().filter(|(k, _)| k == "lsids").count();
+        assert_eq!(lsids_count, 2);
+        assert!(params.contains(&("lsids".to_string(), "urn:lsid:test:run-1".to_string())));
+        assert!(params.contains(&("lsids".to_string(), "urn:lsid:test:run-2".to_string())));
     }
 
     #[test]
@@ -1822,7 +1822,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_params_include_repeated_lsid_and_converter_flags() {
+    fn resolve_params_include_repeated_lsids_and_converter_flags() {
         let options = ResolveOptions::builder()
             .lsids(vec![
                 "urn:lsid:test:data-1".to_string(),
@@ -1838,10 +1838,10 @@ mod tests {
         assert!(params.contains(&("includeProperties".to_string(), "false".to_string())));
         assert!(params.contains(&("includeRunSteps".to_string(), "true".to_string())));
 
-        let lsid_count = params.iter().filter(|(k, _)| k == "lsid").count();
-        assert_eq!(lsid_count, 2);
-        assert!(params.contains(&("lsid".to_string(), "urn:lsid:test:data-1".to_string())));
-        assert!(params.contains(&("lsid".to_string(), "urn:lsid:test:data-2".to_string())));
+        let lsids_count = params.iter().filter(|(k, _)| k == "lsids").count();
+        assert_eq!(lsids_count, 2);
+        assert!(params.contains(&("lsids".to_string(), "urn:lsid:test:data-1".to_string())));
+        assert!(params.contains(&("lsids".to_string(), "urn:lsid:test:data-2".to_string())));
     }
 
     #[test]

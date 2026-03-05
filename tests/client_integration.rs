@@ -4,9 +4,11 @@ use std::time::Duration;
 
 use base64::Engine;
 use common::{LabkeyError, Mock, MockServer, ResponseTemplate, fixture, test_client};
+use labkey_rs::assay::{ImportRunOptions, ImportRunSource};
 #[cfg(feature = "internal-test-support")]
 use labkey_rs::client::__internal_test_support;
 use labkey_rs::common::AuditBehavior;
+use labkey_rs::experiment::{LineageOptions, ResolveOptions};
 use labkey_rs::filter::Filter;
 use labkey_rs::query::{
     CommandType, DataViewType, DeleteQueryViewOptions, DeleteRowsOptions, ExecuteSqlOptions,
@@ -36,6 +38,110 @@ fn waf_encode_for_test(value: &str) -> String {
     let url_encoded = urlencoding::encode(value);
     let b64 = base64::engine::general_purpose::STANDARD.encode(url_encoded.as_bytes());
     format!("/*{{{{base64/x-www-form-urlencoded/wafText}}}}*/{b64}")
+}
+
+#[tokio::test]
+async fn lineage_sends_repeated_lsids_query_params() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/MyProject/MyFolder/experiment-lineage.api"))
+        .and(query_param("lsids", "urn:lsid:test:run-1"))
+        .and(query_param("lsids", "urn:lsid:test:run-2"))
+        .and(query_param_is_missing("lsid"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "seeds": ["urn:lsid:test:run-1", "urn:lsid:test:run-2"],
+            "nodes": {}
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .lineage(
+            LineageOptions::builder()
+                .lsids(vec![
+                    "urn:lsid:test:run-1".to_string(),
+                    "urn:lsid:test:run-2".to_string(),
+                ])
+                .build(),
+        )
+        .await
+        .expect("lineage request should succeed");
+
+    assert_eq!(response.seeds.len(), 2);
+}
+
+#[tokio::test]
+async fn resolve_sends_repeated_lsids_query_params() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/MyProject/MyFolder/experiment-resolve.api"))
+        .and(query_param("lsids", "urn:lsid:test:data-1"))
+        .and(query_param("lsids", "urn:lsid:test:data-2"))
+        .and(query_param_is_missing("lsid"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": []
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .resolve(
+            ResolveOptions::builder()
+                .lsids(vec![
+                    "urn:lsid:test:data-1".to_string(),
+                    "urn:lsid:test:data-2".to_string(),
+                ])
+                .build(),
+        )
+        .await
+        .expect("resolve request should succeed");
+
+    assert!(response.data.is_empty());
+}
+
+#[tokio::test]
+async fn import_run_json_mode_uses_json_part_content_type() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/assay-importRun.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(header_exists("content-type"))
+        .and(body_string_contains("name=\"json\""))
+        .and(body_string_contains("Content-Type: application/json"))
+        .and(body_string_contains("\"assayId\":42"))
+        .and(body_string_contains("\"useJson\":true"))
+        .and(body_string_contains(
+            "\"runFilePath\":\"/files/assay/run.tsv\"",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true,
+            "runId": 101
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .import_run(
+            ImportRunOptions::builder()
+                .assay_id(42)
+                .source(ImportRunSource::RunFilePath(
+                    "/files/assay/run.tsv".to_string(),
+                ))
+                .use_json(true)
+                .build(),
+        )
+        .await
+        .expect("import_run json mode should succeed");
+
+    assert!(response.success);
+    assert_eq!(response.run_id, Some(101));
 }
 
 #[tokio::test]
