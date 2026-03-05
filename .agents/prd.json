@@ -671,8 +671,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 34,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented US-034 in `src/client.rs` by extending non-exhaustive `ClientConfig` with `user_agent: Option<String>`, `accept_self_signed_certs: bool`, and `proxy_url: Option<String>` defaults in `ClientConfig::new`, plus builder-style setters `with_user_agent`, `with_proxy_url`, and `with_accept_self_signed_certs`. Updated `LabkeyClient::new` to build `reqwest::Client` via a shared internal `HttpClientConfig` that applies default UA `labkey-rs/{CARGO_PKG_VERSION}` when custom UA is absent, applies proxy via `reqwest::Proxy::all`, and applies TLS invalid-cert behavior via `danger_accept_invalid_certs`; `prepare_request` remains free of user-agent duplication. Preserved no-follow redirect semantics by rebuilding redirect-disabled clients from persisted `http_config` in the request-options path so UA/proxy/cert settings are retained for `no_follow_redirects` calls. Added rustdoc updates for `LabkeyClient::new` error behavior and new config fields/setters. Expanded tests in `src/client.rs` for `ClientConfig::new` defaults, custom/default UA config selection, self-signed/proxy construction success, and updated in-crate `ClientConfig` struct-literal tests; updated test helpers in `src/domain.rs` and `src/experiment.rs` for new fields. Expanded integration coverage in `tests/client_integration.rs` to assert default and custom `User-Agent` headers on live requests and to verify custom UA is preserved through `stop_impersonating` redirect-disabled flow. Solicited feedback from `nick-isms`, `testing-guru`, and `semver-nag`, incorporated review-driven improvements, and re-ran `just check` successfully after implementation and after feedback updates."
     }
   ]
 }

@@ -1703,6 +1703,9 @@ mod tests {
             base_url: "https://labkey.example.com/labkey".to_string(),
             credential: Credential::ApiKey("test-key".to_string()),
             container_path: "/Project/Folder".to_string(),
+            user_agent: None,
+            accept_self_signed_certs: false,
+            proxy_url: None,
         })
         .expect("valid test client")
     }

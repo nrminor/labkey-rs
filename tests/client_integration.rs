@@ -3,7 +3,10 @@ mod common;
 use std::time::Duration;
 
 use base64::Engine;
-use common::{LabkeyError, Mock, MockServer, ResponseTemplate, fixture, test_client};
+use common::{
+    ClientConfig, Credential, LabkeyClient, LabkeyError, Mock, MockServer, ResponseTemplate,
+    fixture, test_client,
+};
 use labkey_rs::assay::{ImportRunOptions, ImportRunSource};
 #[cfg(feature = "internal-test-support")]
 use labkey_rs::client::__internal_test_support;
@@ -2921,6 +2924,7 @@ async fn logout_posts_no_body_to_login_logout_without_api_suffix() {
 async fn who_am_i_gets_login_whoami_api_and_deserializes_fixture_response() {
     let server = MockServer::start().await;
     let payload: serde_json::Value = fixture("whoami.json");
+    let expected_user_agent = format!("labkey-rs/{}", env!("CARGO_PKG_VERSION"));
 
     Mock::given(method("GET"))
         .and(path("/Alt/Container/login-whoami.api"))
@@ -2928,6 +2932,7 @@ async fn who_am_i_gets_login_whoami_api_and_deserializes_fixture_response() {
         .and(query_param_is_missing("email"))
         .and(query_param_is_missing("userId"))
         .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(header("user-agent", expected_user_agent))
         .and(basic_auth("apikey", "test-api-key"))
         .respond_with(ResponseTemplate::new(200).set_body_json(payload))
         .expect(1)
@@ -2946,6 +2951,35 @@ async fn who_am_i_gets_login_whoami_api_and_deserializes_fixture_response() {
 
     assert_eq!(response.user_id, Some(101));
     assert_eq!(response.email.as_deref(), Some("analyst@example.com"));
+}
+
+#[tokio::test]
+async fn who_am_i_honors_custom_user_agent_header() {
+    let server = MockServer::start().await;
+    let payload: serde_json::Value = fixture("whoami.json");
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/login-whoami.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(header("user-agent", "my-custom-agent/2.0"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(payload))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let config = ClientConfig::new(
+        server.uri(),
+        Credential::ApiKey("test-api-key".to_string()),
+        "/Alt/Container",
+    )
+    .with_user_agent("my-custom-agent/2.0");
+    let client = LabkeyClient::new(config).expect("custom UA client should construct");
+
+    client
+        .who_am_i(WhoAmIOptions::builder().build())
+        .await
+        .expect("who_am_i should succeed with custom UA");
 }
 
 #[tokio::test]
@@ -3097,6 +3131,53 @@ async fn stop_impersonating_treats_http_302_as_success_without_following_redirec
                 .container_path("/Alt/Container".to_string())
                 .build(),
         )
+        .await
+        .expect("stop_impersonating should treat 302 as success");
+}
+
+#[tokio::test]
+async fn stop_impersonating_no_follow_flow_honors_custom_user_agent() {
+    let server = MockServer::start().await;
+    let redirected = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/landing"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("unexpected redirect follow"))
+        .expect(0)
+        .mount(&redirected)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/landing"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("unexpected redirect follow"))
+        .expect(0)
+        .mount(&redirected)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Container/login-stopImpersonating.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(header("user-agent", "my-custom-agent/2.0"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_string(String::new()))
+        .respond_with(
+            ResponseTemplate::new(302)
+                .insert_header("Location", format!("{}/landing", redirected.uri())),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let config = ClientConfig::new(
+        server.uri(),
+        Credential::ApiKey("test-api-key".to_string()),
+        "/Alt/Container",
+    )
+    .with_user_agent("my-custom-agent/2.0");
+    let client = LabkeyClient::new(config).expect("custom UA client should construct");
+
+    client
+        .stop_impersonating(StopImpersonatingOptions::builder().build())
         .await
         .expect("stop_impersonating should treat 302 as success");
 }

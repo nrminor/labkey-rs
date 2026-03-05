@@ -53,6 +53,14 @@ pub struct ClientConfig {
     /// Default container path (e.g., `"/MyProject/MyFolder"`).
     /// Individual requests can override this.
     pub container_path: String,
+    /// Optional custom `User-Agent` header value.
+    ///
+    /// If not set, the client uses `labkey-rs/{version}`.
+    pub user_agent: Option<String>,
+    /// Whether to allow invalid/self-signed TLS certificates.
+    pub accept_self_signed_certs: bool,
+    /// Optional proxy URL used for all HTTP and HTTPS requests.
+    pub proxy_url: Option<String>,
 }
 
 impl ClientConfig {
@@ -67,6 +75,48 @@ impl ClientConfig {
             base_url: base_url.into(),
             credential,
             container_path: container_path.into(),
+            user_agent: None,
+            accept_self_signed_certs: false,
+            proxy_url: None,
+        }
+    }
+
+    /// Set a custom `User-Agent` header value.
+    #[must_use]
+    pub fn with_user_agent(mut self, user_agent: impl Into<String>) -> Self {
+        self.user_agent = Some(user_agent.into());
+        self
+    }
+
+    /// Set a proxy URL used for all requests.
+    #[must_use]
+    pub fn with_proxy_url(mut self, proxy_url: impl Into<String>) -> Self {
+        self.proxy_url = Some(proxy_url.into());
+        self
+    }
+
+    /// Enable or disable acceptance of invalid/self-signed TLS certificates.
+    #[must_use]
+    pub fn with_accept_self_signed_certs(mut self, accept: bool) -> Self {
+        self.accept_self_signed_certs = accept;
+        self
+    }
+}
+
+#[derive(Debug, Clone)]
+struct HttpClientConfig {
+    user_agent: String,
+    accept_self_signed_certs: bool,
+    proxy_url: Option<String>,
+}
+
+impl HttpClientConfig {
+    fn from_client_config(config: &ClientConfig) -> Self {
+        let default_user_agent = format!("labkey-rs/{}", env!("CARGO_PKG_VERSION"));
+        Self {
+            user_agent: config.user_agent.clone().unwrap_or(default_user_agent),
+            accept_self_signed_certs: config.accept_self_signed_certs,
+            proxy_url: config.proxy_url.clone(),
         }
     }
 }
@@ -90,7 +140,7 @@ fn encode_container_path(path: &str) -> String {
 /// [`select_rows`](Self::select_rows) or [`execute_sql`](Self::execute_sql).
 pub struct LabkeyClient {
     http: reqwest::Client,
-    http_no_redirects: reqwest::Client,
+    http_config: HttpClientConfig,
     base_url: Url,
     container_path: String,
     credential: Credential,
@@ -113,19 +163,38 @@ impl LabkeyClient {
     /// # Errors
     ///
     /// Returns [`LabkeyError::Url`] if `config.base_url` is not a valid URL.
+    /// Returns [`LabkeyError::Http`] if HTTP client construction fails (for
+    /// example, invalid proxy URL or invalid user-agent value).
     pub fn new(config: ClientConfig) -> Result<Self, LabkeyError> {
         let base_url = Url::parse(&config.base_url)?;
-        let http = reqwest::Client::new();
-        let http_no_redirects = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build()?;
+        let http_config = HttpClientConfig::from_client_config(&config);
+        let http = Self::build_http_client(&http_config, false)?;
         Ok(Self {
             http,
-            http_no_redirects,
+            http_config,
             base_url,
             container_path: config.container_path,
             credential: config.credential,
         })
+    }
+
+    fn build_http_client(
+        config: &HttpClientConfig,
+        no_follow_redirects: bool,
+    ) -> Result<reqwest::Client, LabkeyError> {
+        let mut builder = reqwest::Client::builder()
+            .user_agent(config.user_agent.clone())
+            .danger_accept_invalid_certs(config.accept_self_signed_certs);
+
+        if let Some(proxy_url) = config.proxy_url.as_deref() {
+            builder = builder.proxy(reqwest::Proxy::all(proxy_url)?);
+        }
+
+        if no_follow_redirects {
+            builder = builder.redirect(reqwest::redirect::Policy::none());
+        }
+
+        Ok(builder.build()?)
     }
 
     /// Build a `LabKey` action URL.
@@ -184,11 +253,11 @@ impl LabkeyClient {
         }
     }
 
-    fn client_for_options(&self, options: &RequestOptions) -> reqwest::Client {
+    fn client_for_options(&self, options: &RequestOptions) -> Result<reqwest::Client, LabkeyError> {
         if options.no_follow_redirects {
-            self.http_no_redirects.clone()
+            Self::build_http_client(&self.http_config, true)
         } else {
-            self.http.clone()
+            Ok(self.http.clone())
         }
     }
 
@@ -260,7 +329,7 @@ impl LabkeyClient {
         params: &[(String, String)],
         options: &RequestOptions,
     ) -> Result<T, LabkeyError> {
-        let client = self.client_for_options(options);
+        let client = self.client_for_options(options)?;
         let request = self.build_get_request(&client, url, params, options)?;
         let response = client.execute(request).await?;
         self.handle_response(response, &options.accepted_statuses)
@@ -284,7 +353,7 @@ impl LabkeyClient {
         body: &B,
         options: &RequestOptions,
     ) -> Result<T, LabkeyError> {
-        let client = self.client_for_options(options);
+        let client = self.client_for_options(options)?;
         let request = self.build_json_post_request(&client, url, body, options)?;
         let response = client.execute(request).await?;
         self.handle_response(response, &options.accepted_statuses)
@@ -298,7 +367,7 @@ impl LabkeyClient {
         body: reqwest::multipart::Form,
         options: &RequestOptions,
     ) -> Result<T, LabkeyError> {
-        let client = self.client_for_options(options);
+        let client = self.client_for_options(options)?;
         let builder = client.post(url).multipart(body);
         let builder = self.prepare_request(builder);
         let builder = Self::apply_request_options(builder, options);
@@ -320,7 +389,7 @@ impl LabkeyClient {
         url: Url,
         options: &RequestOptions,
     ) -> Result<(), LabkeyError> {
-        let client = self.client_for_options(options);
+        let client = self.client_for_options(options)?;
         let request = self.build_post_request_without_body(&client, url, options)?;
         let response = client.execute(request).await?;
         self.handle_empty_response(response, &options.accepted_statuses)
@@ -334,7 +403,7 @@ impl LabkeyClient {
         params: &[(String, String)],
         options: &RequestOptions,
     ) -> Result<T, LabkeyError> {
-        let client = self.client_for_options(options);
+        let client = self.client_for_options(options)?;
         let request = self.build_post_request_with_params(&client, url, params, options)?;
         let response = client.execute(request).await?;
         self.handle_response(response, &options.accepted_statuses)
@@ -446,11 +515,11 @@ mod tests {
     use super::*;
 
     fn test_client(base_url: &str, container_path: &str) -> LabkeyClient {
-        LabkeyClient::new(ClientConfig {
-            base_url: base_url.into(),
-            credential: Credential::ApiKey("test-key".into()),
-            container_path: container_path.into(),
-        })
+        LabkeyClient::new(ClientConfig::new(
+            base_url,
+            Credential::ApiKey("test-key".into()),
+            container_path,
+        ))
         .expect("valid test config")
     }
 
@@ -539,11 +608,11 @@ mod tests {
 
     #[test]
     fn new_rejects_invalid_url() {
-        let result = LabkeyClient::new(ClientConfig {
-            base_url: "not a url".into(),
-            credential: Credential::ApiKey("key".into()),
-            container_path: "/".into(),
-        });
+        let result = LabkeyClient::new(ClientConfig::new(
+            "not a url",
+            Credential::ApiKey("key".into()),
+            "/",
+        ));
         assert!(matches!(result, Err(crate::error::LabkeyError::Url(_))));
     }
 
@@ -553,7 +622,72 @@ mod tests {
             base_url: "https://labkey.example.com/labkey".into(),
             credential: Credential::ApiKey("test-key".into()),
             container_path: "/Project".into(),
+            user_agent: None,
+            accept_self_signed_certs: false,
+            proxy_url: None,
         };
+    }
+
+    #[test]
+    fn client_config_new_defaults_are_stable() {
+        let config = ClientConfig::new(
+            "https://labkey.example.com/labkey",
+            Credential::ApiKey("test-key".into()),
+            "/Project",
+        );
+
+        assert_eq!(config.base_url, "https://labkey.example.com/labkey");
+        assert_eq!(config.container_path, "/Project");
+        assert!(config.user_agent.is_none());
+        assert!(!config.accept_self_signed_certs);
+        assert!(config.proxy_url.is_none());
+    }
+
+    #[test]
+    fn custom_user_agent_is_applied_to_client_configuration() {
+        let config = ClientConfig::new(
+            "https://labkey.example.com/labkey",
+            Credential::ApiKey("test-key".into()),
+            "/MyProject/MyFolder",
+        )
+        .with_user_agent("my-client/1.2.3");
+        let client = LabkeyClient::new(config).expect("valid client config");
+
+        assert_eq!(client.http_config.user_agent, "my-client/1.2.3");
+    }
+
+    #[test]
+    fn default_user_agent_includes_crate_version() {
+        let client = test_client("https://labkey.example.com/labkey", "/MyProject");
+
+        let expected_user_agent = format!("labkey-rs/{}", env!("CARGO_PKG_VERSION"));
+        assert_eq!(client.http_config.user_agent, expected_user_agent);
+    }
+
+    #[test]
+    fn new_accepts_self_signed_certs_option() {
+        let config = ClientConfig::new(
+            "https://labkey.example.com/labkey",
+            Credential::ApiKey("test-key".into()),
+            "/Project",
+        )
+        .with_accept_self_signed_certs(true);
+
+        let client = LabkeyClient::new(config);
+        assert!(client.is_ok());
+    }
+
+    #[test]
+    fn new_accepts_proxy_url_option() {
+        let config = ClientConfig::new(
+            "https://labkey.example.com/labkey",
+            Credential::ApiKey("test-key".into()),
+            "/Project",
+        )
+        .with_proxy_url("http://127.0.0.1:8080");
+
+        let client = LabkeyClient::new(config);
+        assert!(client.is_ok());
     }
 
     #[test]
