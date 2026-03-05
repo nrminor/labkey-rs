@@ -22,6 +22,10 @@ use labkey_rs::query::{
     SaveRowsCommand, SaveRowsOptions, SaveSessionViewOptions, SelectDistinctOptions,
     SelectRowsOptions, TruncateTableOptions, UpdateRowsOptions, ValidateQueryOptions,
 };
+use labkey_rs::report::{
+    CreateSessionOptions, DeleteSessionOptions, ExecuteFunctionOptions, ExecuteOptions,
+    GetSessionsOptions,
+};
 use labkey_rs::security::{
     AddGroupMembersOptions, CreateGroupOptions, CreateNewUserOptions, DeleteGroupOptions,
     DeletePolicyOptions, DeleteUserOptions, EnsureLoginOptions, GetFolderTypesOptions,
@@ -3676,4 +3680,242 @@ async fn delete_policy_rejects_blank_resource_id() {
         }
         other => panic!("expected InvalidInput, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn create_session_posts_expected_json_body() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/reports-createSession.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "clientContext": {
+                "env": "rstudio",
+                "version": 1
+            }
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "reportSessionId": "session-1"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .create_session(
+            CreateSessionOptions::builder()
+                .client_context(serde_json::json!({
+                    "env": "rstudio",
+                    "version": 1
+                }))
+                .build(),
+        )
+        .await
+        .expect("create_session should succeed");
+
+    assert_eq!(response.report_session_id, "session-1");
+}
+
+#[tokio::test]
+async fn delete_session_posts_query_param_and_no_json_body() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/reports-deleteSession.api"))
+        .and(query_param("reportSessionId", "session-1"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_string(""))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .delete_session(
+            DeleteSessionOptions::builder()
+                .report_session_id("session-1".to_string())
+                .build(),
+        )
+        .await
+        .expect("delete_session should succeed");
+
+    assert_eq!(response["success"], serde_json::json!(true));
+}
+
+#[tokio::test]
+async fn execute_flattens_input_params_and_decodes_json_output() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/reports-execute.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "reportId": "db:123",
+            "inputParams[x]": 1,
+            "inputParams[y]": "foo"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "console": ["ok"],
+            "errors": [],
+            "outputParams": [
+                {"name": "jsonout", "type": "json", "value": "{\"a\":1}"},
+                {"name": "textout", "type": "text", "value": "plain"}
+            ]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .execute(
+            ExecuteOptions::builder()
+                .report_id("db:123".to_string())
+                .input_params(std::collections::BTreeMap::from([
+                    ("x".to_string(), serde_json::json!(1)),
+                    ("y".to_string(), serde_json::json!("foo")),
+                ]))
+                .build(),
+        )
+        .await
+        .expect("execute should succeed");
+
+    assert_eq!(response.console, vec!["ok".to_string()]);
+    assert_eq!(response.output_params.len(), 2);
+    assert_eq!(
+        response.output_params[0].value,
+        Some(serde_json::json!({"a": 1}))
+    );
+    assert_eq!(
+        response.output_params[1].value,
+        Some(serde_json::json!("plain"))
+    );
+}
+
+#[tokio::test]
+async fn execute_function_and_get_sessions_use_reports_routes() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/reports-execute.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "functionName": "getSummary",
+            "reportSessionId": "session-1",
+            "inputParams[alpha]": true
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "console": [],
+            "errors": [],
+            "outputParams": []
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/reports-getSessions.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_string(""))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "reportSessions": [{"reportSessionId": "session-1"}]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let execute_response = client
+        .execute_function(
+            ExecuteFunctionOptions::builder()
+                .function_name("getSummary".to_string())
+                .report_session_id("session-1".to_string())
+                .input_params(std::collections::BTreeMap::from([(
+                    "alpha".to_string(),
+                    serde_json::json!(true),
+                )]))
+                .build(),
+        )
+        .await
+        .expect("execute_function should succeed");
+    assert!(execute_response.output_params.is_empty());
+
+    let sessions_response = client
+        .get_sessions(GetSessionsOptions::builder().build())
+        .await
+        .expect("get_sessions should succeed");
+    assert_eq!(sessions_response.report_sessions.len(), 1);
+}
+
+#[tokio::test]
+async fn report_endpoints_honor_container_path_override() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Alt/Reports/reports-createSession.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "clientContext": {"key": "value"}
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "reportSessionId": "session-2"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .create_session(
+            CreateSessionOptions::builder()
+                .client_context(serde_json::json!({"key": "value"}))
+                .container_path("/Alt/Reports".to_string())
+                .build(),
+        )
+        .await
+        .expect("create_session should honor container override");
+
+    assert_eq!(response.report_session_id, "session-2");
+}
+
+#[tokio::test]
+async fn report_validation_rejects_blank_required_fields() {
+    let client = test_client("https://labkey.example.com");
+
+    let delete_err = client
+        .delete_session(
+            DeleteSessionOptions::builder()
+                .report_session_id("   ".to_string())
+                .build(),
+        )
+        .await
+        .expect_err("delete_session should reject blank report_session_id");
+    assert!(matches!(delete_err, LabkeyError::InvalidInput(_)));
+
+    let execute_err = client
+        .execute(ExecuteOptions::builder().build())
+        .await
+        .expect_err("execute should reject missing report identity");
+    assert!(matches!(execute_err, LabkeyError::InvalidInput(_)));
+
+    let function_err = client
+        .execute_function(
+            ExecuteFunctionOptions::builder()
+                .function_name("\n".to_string())
+                .build(),
+        )
+        .await
+        .expect_err("execute_function should reject blank function_name");
+    assert!(matches!(function_err, LabkeyError::InvalidInput(_)));
 }
