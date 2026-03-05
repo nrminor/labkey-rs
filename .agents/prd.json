@@ -480,8 +480,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 24,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented US-024 in src/assay.rs by adding Java-style non-.api assay endpoints get_protocol (GET assay-getProtocol), save_protocol (POST assay-saveProtocol), and get_assay_run (POST assay-getAssayRun). Added non-exhaustive AssayProtocol with the full planned field set and camelCase serde mapping, plus a convenience AssayProtocol::new constructor and a serde flatten extra map to preserve unknown server fields across get/save round-trips. Added ProtocolIdentifier with ByProvider/ById modes, GetProtocolOptions/SaveProtocolOptions/GetAssayRunOptions bon-builder structs with optional container_path, and typed GetAssayRunBody request serialization. Implemented get_protocol/save_protocol response extraction via private ProtocolEnvelope from response.data with endpoint-specific UnexpectedResponse diagnostics and added input validation rejecting blank provider names for ByProvider mode and blank lsid for get_assay_run. Added rustdocs with # Errors and no_run # Example sections for all new public endpoints and types. Expanded inline tests to cover full AssayProtocol round-trip and camelCase keys, get_protocol parameter shaping for provider/id modes including copy=true/false/omitted, response.data extraction for both get_protocol and save_protocol happy/error paths, save_protocol direct body serialization without wrapper keys, typed get_assay_run return/body contract checks, blank-input validation errors, and URL construction for all assay endpoints including no-.api Java routes. Solicited feedback from nick-isms/testing-guru/semver-nag, addressed feedback with stronger validation and higher-signal test assertions, and re-ran just check successfully before and after follow-up changes."
     },
     {
       "id": "US-025",
