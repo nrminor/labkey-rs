@@ -120,6 +120,9 @@ pub struct ExpObject {
     /// Entity id.
     #[serde(default)]
     pub id: Option<i64>,
+    /// Row id for this entity; some servers send `rowId` alongside `id`.
+    #[serde(default)]
+    pub row_id: Option<i64>,
     /// Entity LSID.
     #[serde(default)]
     pub lsid: Option<String>,
@@ -201,6 +204,9 @@ pub struct ExpData {
     /// Data role label.
     #[serde(default)]
     pub role: Option<String>,
+    /// Absolute filesystem path when available.
+    #[serde(default)]
+    pub absolute_path: Option<String>,
 }
 
 /// Experiment material object.
@@ -236,6 +242,21 @@ pub struct Run {
     /// Output material entities.
     #[serde(default)]
     pub material_outputs: Vec<Material>,
+    /// Inline data rows attached to this run.
+    #[serde(default)]
+    pub data_rows: Vec<serde_json::Value>,
+    /// Experiments associated with this run.
+    #[serde(default)]
+    pub experiments: Vec<serde_json::Value>,
+    /// Root path for run data files.
+    #[serde(default)]
+    pub file_path_root: Option<String>,
+    /// Additional structured properties attached to this run.
+    #[serde(default)]
+    pub object_properties: Option<serde_json::Value>,
+    /// Protocol associated with this run.
+    #[serde(default)]
+    pub protocol: Option<Box<ExpObject>>,
 }
 
 /// Group of experiment runs.
@@ -246,15 +267,34 @@ pub struct RunGroup {
     /// Common experiment object fields.
     #[serde(flatten)]
     pub exp_object: ExpObject,
-    /// Batch protocol id.
+    /// Batch protocol id; defaults to `0` when absent from server responses.
     #[serde(default)]
-    pub batch_protocol_id: Option<i64>,
+    pub batch_protocol_id: i64,
     /// Whether this run group is hidden.
     #[serde(default)]
     pub hidden: Option<bool>,
     /// Runs in this group.
     #[serde(default)]
     pub runs: Vec<Run>,
+}
+
+/// A run step in a lineage graph, wrapping a [`Run`] with activity metadata.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct LineageRunStep {
+    /// The underlying run data.
+    #[serde(flatten)]
+    pub run: Run,
+    /// Activity date when available.
+    #[serde(default)]
+    pub activity_date: Option<String>,
+    /// Activity sequence order.
+    #[serde(default)]
+    pub activity_sequence: Option<i64>,
+    /// Application type label.
+    #[serde(default)]
+    pub application_type: Option<String>,
 }
 
 /// Parent-child edge in a lineage graph.
@@ -297,12 +337,15 @@ pub struct LineageNode {
     /// Pipeline path when present.
     #[serde(default)]
     pub pipeline_path: Option<String>,
+    /// Experiment entity type label (e.g. `"Data"`, `"Material"`, `"ExperimentRun"`).
+    #[serde(default)]
+    pub exp_type: Option<String>,
     /// Protocol attached to this node when present.
     #[serde(default)]
     pub protocol: Option<ExpObject>,
     /// Optional run steps included by converter options.
     #[serde(default)]
-    pub steps: Option<Vec<Run>>,
+    pub steps: Option<Vec<LineageRunStep>>,
     /// Input data entities.
     #[serde(default)]
     pub data_inputs: Vec<ExpData>,
@@ -1217,6 +1260,7 @@ impl LabkeyClient {
     ///                         created: None,
     ///                         created_by: None,
     ///                         id: None,
+    ///                         row_id: None,
     ///                         lsid: None,
     ///                         modified: None,
     ///                         modified_by: None,
@@ -1230,7 +1274,7 @@ impl LabkeyClient {
     ///                         properties: None,
     ///                     }
     ///                 },
-    ///                 batch_protocol_id: None,
+    ///                 batch_protocol_id: 0,
     ///                 hidden: None,
     ///                 runs: vec![],
     ///             })
@@ -2025,7 +2069,7 @@ mod tests {
         let group: RunGroup =
             serde_json::from_value(group_json.clone()).expect("deserialize run group");
         assert_eq!(group.exp_object.name.as_deref(), Some("batch-1"));
-        assert_eq!(group.batch_protocol_id, Some(7));
+        assert_eq!(group.batch_protocol_id, 7);
         assert_eq!(group.hidden, Some(true));
         assert_eq!(group.runs.len(), 1);
 
@@ -2047,6 +2091,7 @@ mod tests {
                     created: None,
                     created_by: None,
                     id: None,
+                    row_id: None,
                     lsid: None,
                     modified: None,
                     modified_by: None,
@@ -2059,7 +2104,7 @@ mod tests {
                     url: None,
                     properties: None,
                 },
-                batch_protocol_id: None,
+                batch_protocol_id: 0,
                 hidden: None,
                 runs: vec![],
             })
@@ -2092,6 +2137,7 @@ mod tests {
                     created: None,
                     created_by: None,
                     id: None,
+                    row_id: None,
                     lsid: None,
                     modified: None,
                     modified_by: None,
@@ -2104,7 +2150,7 @@ mod tests {
                     url: None,
                     properties: None,
                 },
-                batch_protocol_id: None,
+                batch_protocol_id: 0,
                 hidden: None,
                 runs: vec![],
             })
@@ -2323,5 +2369,191 @@ mod tests {
             "whitespace-only assay name should be rejected"
         );
         assert!(matches!(result, Err(LabkeyError::InvalidInput(_))));
+    }
+
+    #[test]
+    fn lineage_node_deserializes_exp_type_into_typed_field() {
+        let json = serde_json::json!({
+            "lsid": "urn:lsid:test:node-1",
+            "name": "node-1",
+            "expType": "Material",
+            "parents": [],
+            "children": []
+        });
+
+        let node: LineageNode = serde_json::from_value(json).expect("deserialize lineage node");
+        assert_eq!(node.exp_type.as_deref(), Some("Material"));
+        // exp_type should NOT fall into extra now that it has a typed field
+        assert!(
+            !node.extra.contains_key("expType"),
+            "expType should be captured by typed field, not extra"
+        );
+    }
+
+    #[test]
+    fn lineage_run_step_deserializes_with_activity_metadata() {
+        let json = serde_json::json!({
+            "name": "step-run-1",
+            "dataInputs": [],
+            "dataOutputs": [],
+            "materialInputs": [],
+            "materialOutputs": [],
+            "activityDate": "2025-01-15",
+            "activitySequence": 42,
+            "applicationType": "ExperimentRunOutput"
+        });
+
+        let step: LineageRunStep = serde_json::from_value(json).expect("deserialize run step");
+        assert_eq!(step.run.exp_object.name.as_deref(), Some("step-run-1"));
+        assert!(step.run.data_inputs.is_empty(), "flattened run data_inputs");
+        assert!(
+            step.run.material_outputs.is_empty(),
+            "flattened run material_outputs"
+        );
+        assert_eq!(step.activity_date.as_deref(), Some("2025-01-15"));
+        assert_eq!(step.activity_sequence, Some(42));
+        assert_eq!(
+            step.application_type.as_deref(),
+            Some("ExperimentRunOutput")
+        );
+    }
+
+    #[test]
+    fn lineage_run_step_defaults_activity_fields_when_absent() {
+        let json = serde_json::json!({
+            "name": "minimal-step",
+            "dataInputs": [],
+            "dataOutputs": [],
+            "materialInputs": [],
+            "materialOutputs": []
+        });
+
+        let step: LineageRunStep = serde_json::from_value(json).expect("deserialize minimal step");
+        assert_eq!(step.run.exp_object.name.as_deref(), Some("minimal-step"));
+        assert!(step.activity_date.is_none());
+        assert!(step.activity_sequence.is_none());
+        assert!(step.application_type.is_none());
+    }
+
+    #[test]
+    fn run_deserializes_five_new_fields() {
+        let json = serde_json::json!({
+            "name": "run-with-extras",
+            "dataInputs": [],
+            "dataOutputs": [],
+            "materialInputs": [],
+            "materialOutputs": [],
+            "dataRows": [{"key": "value"}],
+            "experiments": [{"id": 1}],
+            "filePathRoot": "/data/runs",
+            "objectProperties": {"prop1": "val1"},
+            "protocol": {
+                "name": "MyProtocol",
+                "id": 55,
+                "lsid": "urn:lsid:test:protocol-1"
+            }
+        });
+
+        let run: Run = serde_json::from_value(json).expect("deserialize run");
+        assert_eq!(run.exp_object.name.as_deref(), Some("run-with-extras"));
+        assert_eq!(run.data_rows.len(), 1);
+        assert_eq!(run.data_rows[0]["key"], "value");
+        assert_eq!(run.experiments.len(), 1);
+        assert_eq!(run.experiments[0]["id"], 1);
+        assert_eq!(run.file_path_root.as_deref(), Some("/data/runs"));
+        let props = run
+            .object_properties
+            .as_ref()
+            .expect("object_properties present");
+        assert_eq!(props["prop1"], "val1");
+        let protocol = run.protocol.as_ref().expect("protocol present");
+        assert_eq!(protocol.name.as_deref(), Some("MyProtocol"));
+        assert_eq!(protocol.id, Some(55));
+    }
+
+    #[test]
+    fn run_new_fields_default_when_absent() {
+        let json = serde_json::json!({
+            "name": "minimal-run",
+            "dataInputs": [],
+            "dataOutputs": [],
+            "materialInputs": [],
+            "materialOutputs": []
+        });
+
+        let run: Run = serde_json::from_value(json).expect("deserialize minimal run");
+        assert!(run.data_rows.is_empty());
+        assert!(run.experiments.is_empty());
+        assert!(run.file_path_root.is_none());
+        assert!(run.object_properties.is_none());
+        assert!(run.protocol.is_none());
+    }
+
+    #[test]
+    fn exp_data_deserializes_absolute_path() {
+        let json = serde_json::json!({
+            "name": "data-1",
+            "absolutePath": "/files/data/output.tsv"
+        });
+
+        let data: ExpData = serde_json::from_value(json).expect("deserialize exp data");
+        assert_eq!(
+            data.absolute_path.as_deref(),
+            Some("/files/data/output.tsv")
+        );
+    }
+
+    #[test]
+    fn exp_data_absolute_path_defaults_when_absent() {
+        let json = serde_json::json!({
+            "name": "data-minimal"
+        });
+
+        let data: ExpData = serde_json::from_value(json).expect("deserialize minimal exp data");
+        assert!(data.absolute_path.is_none());
+    }
+
+    #[test]
+    fn exp_object_deserializes_row_id() {
+        let json = serde_json::json!({
+            "name": "obj-1",
+            "rowId": 999
+        });
+
+        let obj: ExpObject = serde_json::from_value(json).expect("deserialize exp object");
+        assert_eq!(obj.row_id, Some(999));
+    }
+
+    #[test]
+    fn exp_object_row_id_defaults_when_absent() {
+        let json = serde_json::json!({
+            "name": "obj-minimal"
+        });
+
+        let obj: ExpObject = serde_json::from_value(json).expect("deserialize minimal exp object");
+        assert!(obj.row_id.is_none());
+    }
+
+    #[test]
+    fn run_group_batch_protocol_id_defaults_to_zero_when_absent() {
+        let json = serde_json::json!({
+            "name": "batch-no-protocol",
+            "runs": []
+        });
+
+        let group: RunGroup = serde_json::from_value(json).expect("deserialize run group");
+        assert_eq!(group.batch_protocol_id, 0);
+    }
+
+    #[test]
+    fn run_group_batch_protocol_id_deserializes_present_value() {
+        let json = serde_json::json!({
+            "name": "batch-with-protocol",
+            "batchProtocolId": 42,
+            "runs": []
+        });
+
+        let group: RunGroup = serde_json::from_value(json).expect("deserialize run group");
+        assert_eq!(group.batch_protocol_id, 42);
     }
 }

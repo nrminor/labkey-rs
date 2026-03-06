@@ -454,6 +454,12 @@ pub struct ImportRunResponse {
     /// Pipeline job id for async imports.
     #[serde(default)]
     pub job_id: Option<String>,
+    /// Redirect URL provided on successful import.
+    #[serde(default, rename = "successurl")]
+    pub success_url: Option<String>,
+    /// Assay id associated with the import.
+    #[serde(default)]
+    pub assay_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1982,6 +1988,28 @@ mod tests {
         assert!(response.run_id.is_none());
         assert!(response.batch_id.is_none());
         assert!(response.job_id.is_none());
+        assert!(response.success_url.is_none());
+        assert!(response.assay_id.is_none());
+    }
+
+    #[test]
+    fn import_run_response_deserializes_success_url_lowercase_wire_key_and_assay_id() {
+        let value = serde_json::json!({
+            "success": true,
+            "runId": 55,
+            "successurl": "http://labkey.example.com/success",
+            "assayId": 101
+        });
+
+        let response: ImportRunResponse =
+            serde_json::from_value(value).expect("deserialize import run response with new fields");
+        assert!(response.success);
+        assert_eq!(response.run_id, Some(55));
+        assert_eq!(
+            response.success_url.as_deref(),
+            Some("http://labkey.example.com/success")
+        );
+        assert_eq!(response.assay_id, Some(101));
     }
 
     #[test]
