@@ -111,6 +111,7 @@ pub struct Row {
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[non_exhaustive]
 pub struct QueryColumn {
     /// Internal column name.
     pub name: String,
@@ -129,30 +130,40 @@ pub struct QueryColumn {
     #[serde(default)]
     pub sql_type: Option<String>,
     /// Whether this column is hidden by default.
-    #[serde(default)]
+    #[serde(default, alias = "isHidden")]
     pub hidden: bool,
     /// Whether this column allows null values.
-    #[serde(default)]
+    #[serde(default, alias = "isNullable")]
     pub nullable: bool,
     /// Whether this column is read-only.
-    #[serde(default)]
+    #[serde(default, alias = "isReadOnly")]
     pub read_only: bool,
     /// Whether this column is editable by users.
-    #[serde(default)]
+    #[serde(default, alias = "isUserEditable")]
     pub user_editable: bool,
     /// Whether this column auto-increments.
-    #[serde(default)]
+    #[serde(default, alias = "isAutoIncrement")]
     pub auto_increment: bool,
     /// Whether this column is a primary key field.
-    #[serde(default)]
+    #[serde(default, alias = "isKeyField")]
     pub key_field: bool,
     /// Whether missing-value indicators are enabled for this column.
-    #[serde(default)]
+    #[serde(default, alias = "isMvEnabled")]
     pub mv_enabled: bool,
+    /// Foreign-key lookup metadata for this column, if it references another table.
+    #[serde(default)]
+    pub lookup: Option<QueryLookup>,
+    /// Whether this column is selectable in views.
+    #[serde(default, alias = "isSelectable")]
+    pub selectable: bool,
+    /// Whether this column is a version/timestamp field.
+    #[serde(default, alias = "isVersionField")]
+    pub version_field: bool,
 }
 
 /// Metadata block in a query response.
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct ResponseMetadata {
     /// Column definitions.
     pub fields: Vec<QueryColumn>,
@@ -168,6 +179,12 @@ pub struct ResponseMetadata {
     /// Description of the underlying query.
     #[serde(default)]
     pub description: Option<String>,
+    /// Server-provided message about data import behavior, if any.
+    #[serde(default, rename = "importMessage")]
+    pub import_message: Option<String>,
+    /// Available import templates for the underlying query.
+    #[serde(default, rename = "importTemplates")]
+    pub import_templates: Vec<QueryImportTemplate>,
 }
 
 /// Response from [`LabkeyClient::select_rows`] or [`LabkeyClient::execute_sql`].
@@ -625,6 +642,11 @@ pub struct SelectDistinctOptions {
     pub ignore_filter: Option<bool>,
     /// Parameters for parameterized queries.
     pub parameters: Option<HashMap<String, String>>,
+    /// HTTP method for the request. When set to [`RequestMethod::Post`], the
+    /// request is sent as a POST with form-encoded body instead of the default
+    /// GET with query parameters. This avoids URL length limits for requests
+    /// with complex filters.
+    pub method: Option<RequestMethod>,
 }
 
 /// Response from [`LabkeyClient::select_distinct_rows`].
@@ -1136,7 +1158,10 @@ pub struct QueryLookup {
     #[serde(default)]
     pub display_column: Option<String>,
     /// Whether the lookup is marked public in server metadata.
-    #[serde(default)]
+    ///
+    /// Accepts both `isPublic` (from `camelCase` rename) and bare `public`
+    /// wire keys; the server may send either form depending on version.
+    #[serde(default, alias = "public")]
     pub is_public: Option<bool>,
     /// Key column in the lookup table.
     #[serde(default)]
@@ -1147,6 +1172,18 @@ pub struct QueryLookup {
     /// Schema name for the lookup target.
     #[serde(default)]
     pub schema_name: Option<String>,
+    /// Table name for the lookup target (may differ from `query_name`).
+    #[serde(default)]
+    pub table: Option<String>,
+    /// Multi-valued lookup mode (e.g., `"junction"`).
+    #[serde(default)]
+    pub multi_valued: Option<String>,
+    /// Junction lookup name for multi-valued relationships.
+    #[serde(default)]
+    pub junction_lookup: Option<String>,
+    /// Filter groups for the lookup, if any.
+    #[serde(default)]
+    pub filter_groups: Option<serde_json::Value>,
 }
 
 /// Column metadata returned by [`LabkeyClient::get_query_details`].
@@ -1956,6 +1993,7 @@ impl LabkeyClient {
             "selectDistinct.api",
             options.container_path.as_deref(),
         );
+        let use_post = options.method == Some(RequestMethod::Post);
         let dr = options
             .data_region_name
             .unwrap_or_else(|| "query".to_string());
@@ -1993,7 +2031,11 @@ impl LabkeyClient {
             }
         }
 
-        self.get(url, &params).await
+        if use_post {
+            self.post_form(url, &params).await
+        } else {
+            self.get(url, &params).await
+        }
     }
 
     /// Fetch schema/query metadata and view details.
@@ -4539,5 +4581,234 @@ mod tests {
                 assert_eq!(i == j, a == b, "{a:?} vs {b:?}");
             }
         }
+    }
+
+    // -- US-036 tests --
+
+    #[test]
+    fn query_column_deserializes_is_hidden_alias() {
+        let json = serde_json::json!({
+            "name": "Secret",
+            "fieldKey": "Secret",
+            "isHidden": true
+        });
+        let col: QueryColumn = serde_json::from_value(json).expect("should deserialize");
+        assert!(col.hidden, "isHidden alias should map to hidden");
+    }
+
+    #[test]
+    fn query_column_deserializes_all_is_aliases() {
+        let json = serde_json::json!({
+            "name": "Col",
+            "fieldKey": "Col",
+            "isHidden": true,
+            "isNullable": true,
+            "isReadOnly": true,
+            "isUserEditable": true,
+            "isAutoIncrement": true,
+            "isKeyField": true,
+            "isMvEnabled": true,
+            "isSelectable": true,
+            "isVersionField": true
+        });
+        let col: QueryColumn = serde_json::from_value(json).expect("should deserialize");
+        assert!(col.hidden);
+        assert!(col.nullable);
+        assert!(col.read_only);
+        assert!(col.user_editable);
+        assert!(col.auto_increment);
+        assert!(col.key_field);
+        assert!(col.mv_enabled);
+        assert!(col.selectable);
+        assert!(col.version_field);
+    }
+
+    #[test]
+    fn query_column_deserializes_camel_case_booleans() {
+        // The primary camelCase keys should still work.
+        let json = serde_json::json!({
+            "name": "Col",
+            "fieldKey": "Col",
+            "hidden": true,
+            "nullable": true,
+            "readOnly": true,
+            "userEditable": true,
+            "autoIncrement": true,
+            "keyField": true,
+            "mvEnabled": true,
+            "selectable": true,
+            "versionField": true
+        });
+        let col: QueryColumn = serde_json::from_value(json).expect("should deserialize");
+        assert!(col.hidden);
+        assert!(col.nullable);
+        assert!(col.read_only);
+        assert!(col.user_editable);
+        assert!(col.auto_increment);
+        assert!(col.key_field);
+        assert!(col.mv_enabled);
+        assert!(col.selectable);
+        assert!(col.version_field);
+    }
+
+    #[test]
+    fn query_column_booleans_default_false_when_absent() {
+        let json = serde_json::json!({
+            "name": "Col",
+            "fieldKey": "Col"
+        });
+        let col: QueryColumn = serde_json::from_value(json).expect("should deserialize");
+        assert!(!col.hidden);
+        assert!(!col.nullable);
+        assert!(!col.read_only);
+        assert!(!col.user_editable);
+        assert!(!col.auto_increment);
+        assert!(!col.key_field);
+        assert!(!col.mv_enabled);
+        assert!(!col.selectable);
+        assert!(!col.version_field);
+        assert!(col.lookup.is_none());
+    }
+
+    #[test]
+    fn query_column_deserializes_nested_lookup() {
+        let json = serde_json::json!({
+            "name": "CreatedBy",
+            "fieldKey": "CreatedBy",
+            "lookup": {
+                "queryName": "Users",
+                "schemaName": "core",
+                "keyColumn": "UserId",
+                "table": "Users",
+                "multiValued": "junction"
+            }
+        });
+        let col: QueryColumn = serde_json::from_value(json).expect("should deserialize");
+        let lookup = col.lookup.expect("lookup should be Some");
+        assert_eq!(lookup.query_name.as_deref(), Some("Users"));
+        assert_eq!(lookup.schema_name.as_deref(), Some("core"));
+        assert_eq!(lookup.key_column.as_deref(), Some("UserId"));
+        assert_eq!(lookup.table.as_deref(), Some("Users"));
+        assert_eq!(lookup.multi_valued.as_deref(), Some("junction"));
+    }
+
+    #[test]
+    fn query_column_lookup_absent_is_none() {
+        let json = serde_json::json!({
+            "name": "Name",
+            "fieldKey": "Name"
+        });
+        let col: QueryColumn = serde_json::from_value(json).expect("should deserialize");
+        assert!(col.lookup.is_none());
+    }
+
+    #[test]
+    fn response_metadata_deserializes_import_fields() {
+        let json = serde_json::json!({
+            "fields": [{
+                "name": "Col",
+                "fieldKey": "Col"
+            }],
+            "importMessage": "Use TSV format",
+            "importTemplates": [
+                { "label": "TSV Template", "url": "/template.tsv" }
+            ]
+        });
+        let meta: ResponseMetadata = serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(meta.import_message.as_deref(), Some("Use TSV format"));
+        assert_eq!(meta.import_templates.len(), 1);
+        assert_eq!(meta.import_templates[0].label, "TSV Template");
+        assert_eq!(meta.import_templates[0].url, "/template.tsv");
+    }
+
+    #[test]
+    fn response_metadata_import_fields_default_when_absent() {
+        let json = serde_json::json!({
+            "fields": [{
+                "name": "Col",
+                "fieldKey": "Col"
+            }]
+        });
+        let meta: ResponseMetadata = serde_json::from_value(json).expect("should deserialize");
+        assert!(meta.import_message.is_none());
+        assert!(meta.import_templates.is_empty());
+    }
+
+    #[test]
+    fn query_lookup_deserializes_new_fields() {
+        let json = serde_json::json!({
+            "queryName": "Users",
+            "schemaName": "core",
+            "keyColumn": "UserId",
+            "table": "Users",
+            "multiValued": "junction",
+            "junctionLookup": "MemberOf",
+            "filterGroups": [{"name": "active"}]
+        });
+        let lookup: QueryLookup = serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(lookup.table.as_deref(), Some("Users"));
+        assert_eq!(lookup.multi_valued.as_deref(), Some("junction"));
+        assert_eq!(lookup.junction_lookup.as_deref(), Some("MemberOf"));
+        let fg = lookup.filter_groups.expect("filter_groups should be Some");
+        let arr = fg.as_array().expect("filter_groups should be an array");
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["name"], "active");
+    }
+
+    #[test]
+    fn query_lookup_new_fields_default_none_when_absent() {
+        let json = serde_json::json!({
+            "queryName": "Users",
+            "schemaName": "core"
+        });
+        let lookup: QueryLookup = serde_json::from_value(json).expect("should deserialize");
+        assert!(lookup.table.is_none());
+        assert!(lookup.multi_valued.is_none());
+        assert!(lookup.junction_lookup.is_none());
+        assert!(lookup.filter_groups.is_none());
+    }
+
+    #[test]
+    fn query_lookup_accepts_public_alias_for_is_public() {
+        // The server sometimes sends "public" instead of "isPublic".
+        let json = serde_json::json!({
+            "queryName": "Users",
+            "schemaName": "core",
+            "public": true
+        });
+        let lookup: QueryLookup = serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(lookup.is_public, Some(true));
+    }
+
+    #[test]
+    fn query_lookup_accepts_is_public_primary_key() {
+        let json = serde_json::json!({
+            "queryName": "Users",
+            "schemaName": "core",
+            "isPublic": false
+        });
+        let lookup: QueryLookup = serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(lookup.is_public, Some(false));
+    }
+
+    #[test]
+    fn select_distinct_options_includes_method_field() {
+        let opts = SelectDistinctOptions::builder()
+            .schema_name("core".to_string())
+            .query_name("Users".to_string())
+            .column("Name".to_string())
+            .method(RequestMethod::Post)
+            .build();
+        assert_eq!(opts.method, Some(RequestMethod::Post));
+    }
+
+    #[test]
+    fn select_distinct_options_method_defaults_to_none() {
+        let opts = SelectDistinctOptions::builder()
+            .schema_name("core".to_string())
+            .query_name("Users".to_string())
+            .column("Name".to_string())
+            .build();
+        assert!(opts.method.is_none());
     }
 }

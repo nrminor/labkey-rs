@@ -1084,6 +1084,43 @@ async fn select_distinct_rows_supports_custom_data_region_and_positive_max_rows(
 }
 
 #[tokio::test]
+async fn select_distinct_rows_uses_post_form_body_when_method_is_post() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/query-selectDistinct.api"))
+        .and(header("content-type", "application/x-www-form-urlencoded"))
+        .and(body_string_contains("dataRegionName=query"))
+        .and(body_string_contains("schemaName=lists"))
+        .and(body_string_contains("query.queryName=People"))
+        .and(body_string_contains("query.columns=Gender"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "queryName": "People",
+            "values": ["F", "M"]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .select_distinct_rows(
+            SelectDistinctOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .column("Gender".to_string())
+                .method(RequestMethod::Post)
+                .build(),
+        )
+        .await
+        .expect("POST request should succeed");
+
+    assert_eq!(response.values.len(), 2);
+}
+
+#[tokio::test]
 async fn get_query_details_supports_multiple_fields_and_view_names() {
     let server = MockServer::start().await;
 
