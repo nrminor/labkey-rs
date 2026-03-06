@@ -9,20 +9,39 @@ use crate::{
 };
 
 /// List key type used when creating list domains.
+///
+/// Maps to the JS client's `keyType` parameter in `List.create`. `IntList`
+/// and `VarList` correspond to the two domain kinds, while
+/// `AutoIncrementInteger` produces an `IntList` domain with an explicit
+/// `keyType: "AutoIncrementInteger"` in the domain options.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ListKeyType {
     /// Integer-keyed list (`IntList`).
     IntList,
-    /// String-keyed list (`VarList`).
+    /// String-keyed list (`VarList`). Injects `keyType: "Varchar"` into
+    /// domain options.
     VarList,
+    /// Auto-increment integer-keyed list. Uses the `IntList` domain kind
+    /// with `keyType: "AutoIncrementInteger"` in domain options.
+    AutoIncrementInteger,
 }
 
 impl ListKeyType {
     const fn as_domain_kind(self) -> DomainKind {
         match self {
-            Self::IntList => DomainKind::IntList,
+            Self::IntList | Self::AutoIncrementInteger => DomainKind::IntList,
             Self::VarList => DomainKind::VarList,
+        }
+    }
+
+    /// Returns the `keyType` value to inject into domain options, if any.
+    /// `IntList` uses the server default and needs no explicit key type.
+    const fn key_type_value(self) -> Option<&'static str> {
+        match self {
+            Self::IntList => None,
+            Self::VarList => Some("Varchar"),
+            Self::AutoIncrementInteger => Some("AutoIncrementInteger"),
         }
     }
 }
@@ -59,9 +78,15 @@ fn default_domain_design(name: String) -> DomainDesign {
     }
 }
 
-fn create_list_options_json(key_name: String) -> serde_json::Value {
+fn create_list_options_json(key_name: String, key_type: ListKeyType) -> serde_json::Value {
     let mut options = serde_json::Map::new();
     options.insert("keyName".to_string(), serde_json::Value::String(key_name));
+    if let Some(kt) = key_type.key_type_value() {
+        options.insert(
+            "keyType".to_string(),
+            serde_json::Value::String(kt.to_string()),
+        );
+    }
     serde_json::Value::Object(options)
 }
 
@@ -77,7 +102,7 @@ fn map_create_list_to_create_domain_options(options: CreateListOptions) -> Creat
         .maybe_container_path(options.container_path)
         .domain_design(domain_design)
         .kind(options.key_type.as_domain_kind())
-        .options(create_list_options_json(options.key_name))
+        .options(create_list_options_json(options.key_name, options.key_type))
         .maybe_timeout(options.timeout)
         .build()
 }
@@ -151,13 +176,13 @@ mod tests {
 
     fn list_key_type_variant_count(value: ListKeyType) -> usize {
         match value {
-            ListKeyType::IntList | ListKeyType::VarList => 2,
+            ListKeyType::IntList | ListKeyType::VarList | ListKeyType::AutoIncrementInteger => 3,
         }
     }
 
     #[test]
     fn list_key_type_variant_count_regression() {
-        assert_eq!(list_key_type_variant_count(ListKeyType::IntList), 2);
+        assert_eq!(list_key_type_variant_count(ListKeyType::IntList), 3);
     }
 
     #[test]
@@ -293,5 +318,65 @@ mod tests {
             validate_create_list_options(&blank_key_name),
             Err(LabkeyError::InvalidInput(message)) if message.contains("key_name")
         ));
+    }
+
+    #[test]
+    fn var_list_injects_key_type_varchar_into_options() {
+        let mapped = map_create_list_to_create_domain_options(
+            CreateListOptions::builder()
+                .name("StringList".to_string())
+                .key_name("Name".to_string())
+                .key_type(ListKeyType::VarList)
+                .build(),
+        );
+
+        assert_eq!(mapped.kind, Some(DomainKind::VarList));
+        assert_eq!(
+            mapped.options,
+            Some(serde_json::json!({
+                "keyName": "Name",
+                "keyType": "Varchar"
+            }))
+        );
+    }
+
+    #[test]
+    fn auto_increment_integer_maps_to_int_list_domain_with_key_type() {
+        let mapped = map_create_list_to_create_domain_options(
+            CreateListOptions::builder()
+                .name("AutoList".to_string())
+                .key_name("RowId".to_string())
+                .key_type(ListKeyType::AutoIncrementInteger)
+                .build(),
+        );
+
+        assert_eq!(mapped.kind, Some(DomainKind::IntList));
+        assert_eq!(
+            mapped.options,
+            Some(serde_json::json!({
+                "keyName": "RowId",
+                "keyType": "AutoIncrementInteger"
+            }))
+        );
+    }
+
+    #[test]
+    fn int_list_does_not_inject_key_type() {
+        let mapped = map_create_list_to_create_domain_options(
+            CreateListOptions::builder()
+                .name("IntegerList".to_string())
+                .key_name("RowId".to_string())
+                .key_type(ListKeyType::IntList)
+                .build(),
+        );
+
+        assert_eq!(mapped.kind, Some(DomainKind::IntList));
+        // IntList relies on the server default — no keyType in options
+        assert_eq!(
+            mapped.options,
+            Some(serde_json::json!({
+                "keyName": "RowId"
+            }))
+        );
     }
 }

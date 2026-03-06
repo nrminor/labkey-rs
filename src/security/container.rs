@@ -20,6 +20,10 @@ pub struct CreateContainerOptions {
     pub name: String,
     /// Optional container override for where the container is created.
     pub container_path: Option<String>,
+    /// Optional container type (e.g. `"project"`, `"folder"`, `"workbook"`).
+    ///
+    /// This is a Java-only parameter — the JS client does not send it.
+    pub container_type: Option<String>,
     /// Optional description, used primarily for workbook creation.
     pub description: Option<String>,
     /// Optional folder type name to apply.
@@ -162,6 +166,8 @@ pub struct MoveContainerResponse {
 #[serde(rename_all = "camelCase")]
 struct CreateContainerBody {
     name: String,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    container_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -385,6 +391,7 @@ impl LabkeyClient {
         );
         let body = CreateContainerBody {
             name: options.name,
+            container_type: options.container_type,
             description: options.description,
             folder_type: options.folder_type,
             is_workbook: options.is_workbook,
@@ -806,6 +813,7 @@ mod tests {
     fn create_container_body_serializes_required_and_optional_fields() {
         let body = CreateContainerBody {
             name: "FolderA".to_string(),
+            container_type: Some("folder".to_string()),
             description: Some("desc".to_string()),
             folder_type: Some("Study".to_string()),
             is_workbook: Some(true),
@@ -814,6 +822,7 @@ mod tests {
 
         let value = serde_json::to_value(body).expect("should serialize");
         assert_eq!(value.get("name"), Some(&serde_json::json!("FolderA")));
+        assert_eq!(value.get("type"), Some(&serde_json::json!("folder")));
         assert_eq!(value.get("description"), Some(&serde_json::json!("desc")));
         assert_eq!(value.get("folderType"), Some(&serde_json::json!("Study")));
         assert_eq!(value.get("isWorkbook"), Some(&serde_json::json!(true)));

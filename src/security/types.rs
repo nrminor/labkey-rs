@@ -150,11 +150,19 @@ pub struct User {
 }
 
 /// Group principal metadata.
+///
+/// The server sends `id` in `getGroupPerms.api` responses (matching the JS
+/// `Group` interface), but some endpoints use `groupId`. The `alias` accepts
+/// both wire keys.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct Group {
     /// Group id.
+    ///
+    /// Accepts both `"id"` (JS wire format from `getGroupPerms.api`) and
+    /// `"groupId"` (used by some group-management endpoints).
+    #[serde(alias = "id")]
     pub group_id: i64,
     /// Group name.
     pub name: String,
@@ -182,13 +190,18 @@ pub struct Role {
 }
 
 /// Permission metadata nested in role responses.
+///
+/// Matches the JS `RolePermission` interface (`security/Permission.ts`).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct RolePermission {
-    /// Permission class name.
-    #[serde(default)]
-    pub class_name: Option<String>,
+    /// Unique permission name (typically a fully-qualified Java class name).
+    ///
+    /// Matches the JS `uniqueName` field. The server may also send this as
+    /// `className` in some response shapes, so both keys are accepted.
+    #[serde(default, alias = "className")]
+    pub unique_name: Option<String>,
     /// Permission display name.
     pub name: String,
 }
@@ -228,20 +241,26 @@ pub struct SecurableResource {
     pub children: Vec<SecurableResource>,
 }
 
-/// Policy assignment metadata.
+/// A single role assignment for a principal (user or group).
+///
+/// Each assignment pairs one principal (`user_id`) with one role. The server
+/// sends one assignment entry per role-principal pair, matching the JS
+/// `Policy` interface (`security/Policy.ts:51-60`).
+///
+/// Despite the field name, `user_id` is a principal id that can refer to
+/// either a user or a group — the `LabKey` security model treats both as
+/// principals.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct PolicyAssignment {
-    /// User id for user-scoped assignments.
+    /// Principal id (user or group).
     #[serde(default)]
     pub user_id: Option<i64>,
-    /// Group id for group-scoped assignments.
+    /// Fully-qualified role class name assigned to this principal
+    /// (e.g. `"org.labkey.api.security.roles.EditorRole"`).
     #[serde(default)]
-    pub group_id: Option<i64>,
-    /// Roles assigned to the principal.
-    #[serde(default)]
-    pub role_names: Vec<String>,
+    pub role: Option<String>,
 }
 
 /// Security policy metadata.
@@ -322,10 +341,19 @@ mod tests {
 
     #[test]
     fn group_deserializes_minimal_fixture() {
-        let value = serde_json::json!({"groupId": 10, "name": "Developers"});
+        // Server sends "id" in getGroupPerms responses (JS wire format).
+        let value = serde_json::json!({"id": 10, "name": "Developers"});
         let group: Group = serde_json::from_value(value).expect("valid group");
         assert_eq!(group.group_id, 10);
         assert_eq!(group.name, "Developers");
+    }
+
+    #[test]
+    fn group_deserializes_group_id_alias() {
+        // Some endpoints use "groupId" instead of "id".
+        let value = serde_json::json!({"groupId": 10, "name": "Developers"});
+        let group: Group = serde_json::from_value(value).expect("valid group");
+        assert_eq!(group.group_id, 10);
     }
 
     #[test]
@@ -410,11 +438,18 @@ mod tests {
     }
 
     #[test]
-    fn policy_assignment_deserializes_role_names() {
-        let value = serde_json::json!({"groupId": 5, "roleNames": ["Editor"]});
+    fn policy_assignment_deserializes_js_wire_format() {
+        // Server sends one role per assignment with userId (JS Policy interface).
+        let value = serde_json::json!({
+            "role": "org.labkey.api.security.roles.EditorRole",
+            "userId": 1001
+        });
         let assignment: PolicyAssignment =
             serde_json::from_value(value).expect("valid policy assignment");
-        assert_eq!(assignment.group_id, Some(5));
-        assert_eq!(assignment.role_names, vec!["Editor"]);
+        assert_eq!(assignment.user_id, Some(1001));
+        assert_eq!(
+            assignment.role,
+            Some("org.labkey.api.security.roles.EditorRole".to_string())
+        );
     }
 }

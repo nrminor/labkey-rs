@@ -152,8 +152,6 @@ pub struct GetSecurableResourcesOptions {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawRolePermission {
-    #[serde(default)]
-    class_name: Option<String>,
     name: String,
     unique_name: String,
 }
@@ -243,9 +241,9 @@ fn map_roles(response: GetRolesRawResponse) -> Result<Vec<Role>, LabkeyError> {
         .into_iter()
         .map(|permission| {
             (
-                permission.unique_name,
+                permission.unique_name.clone(),
                 RolePermission {
-                    class_name: permission.class_name,
+                    unique_name: Some(permission.unique_name),
                     name: permission.name,
                 },
             )
@@ -531,7 +529,7 @@ mod tests {
                 "id": "c1",
                 "name": "Project",
                 "path": "/Home/Project",
-                "groups": [{ "groupId": 5, "name": "Readers" }],
+                "groups": [{ "id": 5, "name": "Readers" }],
                 "children": [
                     {
                         "id": "c2",
@@ -610,7 +608,6 @@ mod tests {
     fn get_roles_maps_permission_references_to_permission_objects() {
         let response = GetRolesRawResponse {
             permissions: vec![RawRolePermission {
-                class_name: Some("org.labkey.api.security.permissions.ReadPermission".to_string()),
                 name: "Read".to_string(),
                 unique_name: "org.labkey.api.security.permissions.ReadPermission".to_string(),
             }],

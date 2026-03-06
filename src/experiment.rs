@@ -404,8 +404,9 @@ pub enum HiddenRunGroupMembers {
 #[derive(Debug, Clone, bon::Builder)]
 #[non_exhaustive]
 pub struct SaveBatchOptions {
-    /// The assay protocol id.
-    pub assay_id: i64,
+    /// The assay protocol id. Either this or `assay_name` / `protocol_name`
+    /// must be provided to identify the target assay.
+    pub assay_id: Option<i64>,
     /// Modified run group to save.
     pub batch: RunGroup,
     /// Optional assay name.
@@ -424,8 +425,9 @@ pub struct SaveBatchOptions {
 #[derive(Debug, Clone, bon::Builder)]
 #[non_exhaustive]
 pub struct SaveBatchesOptions {
-    /// The assay protocol id.
-    pub assay_id: i64,
+    /// The assay protocol id. Either this or `assay_name` / `protocol_name`
+    /// must be provided to identify the target assay.
+    pub assay_id: Option<i64>,
     /// Modified run groups to save.
     pub batches: Vec<RunGroup>,
     /// Optional assay name.
@@ -604,7 +606,8 @@ pub struct EntitySequenceResponse {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SaveBatchesBody {
-    assay_id: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assay_id: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     assay_name: Option<String>,
     batches: Vec<RunGroup>,
@@ -1239,7 +1242,7 @@ impl LabkeyClient {
     /// ```
     pub async fn save_batch(&self, options: SaveBatchOptions) -> Result<RunGroup, LabkeyError> {
         validate_assay_identity(
-            Some(options.assay_id),
+            options.assay_id,
             options.assay_name.as_deref(),
             "save_batch",
         )?;
@@ -1296,7 +1299,7 @@ impl LabkeyClient {
     ) -> Result<Vec<RunGroup>, LabkeyError> {
         validate_save_batches_options(&options)?;
         validate_assay_identity(
-            Some(options.assay_id),
+            options.assay_id,
             options.assay_name.as_deref(),
             "save_batches",
         )?;
@@ -2074,6 +2077,48 @@ mod tests {
             1
         );
         assert_eq!(body_json["batches"][0]["name"], "batch-one");
+    }
+
+    #[test]
+    fn save_batch_body_omits_assay_id_when_none() {
+        let options = SaveBatchOptions::builder()
+            .protocol_name("MyProtocol".to_string())
+            .batch(RunGroup {
+                exp_object: ExpObject {
+                    comment: None,
+                    container: None,
+                    container_path: None,
+                    cpas_type: None,
+                    created: None,
+                    created_by: None,
+                    id: None,
+                    lsid: None,
+                    modified: None,
+                    modified_by: None,
+                    name: Some("batch-no-id".to_string()),
+                    pk_filters: vec![],
+                    query_name: None,
+                    restricted: None,
+                    schema_name: None,
+                    type_: None,
+                    url: None,
+                    properties: None,
+                },
+                batch_protocol_id: None,
+                hidden: None,
+                runs: vec![],
+            })
+            .build();
+
+        let body = build_save_batch_body(options);
+        let body_json = serde_json::to_value(body).expect("serialize save batch body");
+        // assayId should be absent from the JSON when not provided
+        assert!(
+            body_json.get("assayId").is_none(),
+            "assayId should be omitted when None"
+        );
+        assert_eq!(body_json["protocolName"], "MyProtocol");
+        assert_eq!(body_json["batches"][0]["name"], "batch-no-id");
     }
 
     #[test]

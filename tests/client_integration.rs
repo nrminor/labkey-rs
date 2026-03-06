@@ -3589,7 +3589,7 @@ async fn get_group_permissions_sends_expected_params_and_deserializes_children()
                 "id": "c1",
                 "name": "Project",
                 "path": "/Alt/Container",
-                "groups": [{"groupId": 9, "name": "Readers"}],
+                "groups": [{"id": 9, "name": "Readers"}],
                 "children": [{
                     "id": "c2",
                     "name": "Subfolder",
