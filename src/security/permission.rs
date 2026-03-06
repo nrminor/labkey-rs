@@ -154,6 +154,10 @@ pub struct GetSecurableResourcesOptions {
 struct RawRolePermission {
     name: String,
     unique_name: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    source_module: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -163,7 +167,13 @@ struct RawRole {
     unique_name: Option<String>,
     name: String,
     #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    excluded_principals: Vec<i64>,
+    #[serde(default)]
     permissions: Vec<String>,
+    #[serde(default)]
+    source_module: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -245,6 +255,8 @@ fn map_roles(response: GetRolesRawResponse) -> Result<Vec<Role>, LabkeyError> {
                 RolePermission {
                     unique_name: Some(permission.unique_name),
                     name: permission.name,
+                    description: permission.description,
+                    source_module: permission.source_module,
                 },
             )
         })
@@ -272,7 +284,10 @@ fn map_roles(response: GetRolesRawResponse) -> Result<Vec<Role>, LabkeyError> {
             Ok(Role {
                 unique_name: role.unique_name,
                 name: role.name,
+                description: role.description,
+                excluded_principals: role.excluded_principals,
                 permissions: mapped_permissions?,
+                source_module: role.source_module,
             })
         })
         .collect()
@@ -610,11 +625,16 @@ mod tests {
             permissions: vec![RawRolePermission {
                 name: "Read".to_string(),
                 unique_name: "org.labkey.api.security.permissions.ReadPermission".to_string(),
+                description: Some("Can read data".to_string()),
+                source_module: Some("Core".to_string()),
             }],
             roles: vec![RawRole {
                 unique_name: Some("org.labkey.security.roles.ReaderRole".to_string()),
                 name: "Reader".to_string(),
+                description: Some("Read-only access".to_string()),
+                excluded_principals: vec![],
                 permissions: vec!["org.labkey.api.security.permissions.ReadPermission".to_string()],
+                source_module: Some("Core".to_string()),
             }],
         };
 
@@ -632,7 +652,10 @@ mod tests {
             roles: vec![RawRole {
                 unique_name: Some("org.labkey.security.roles.ReaderRole".to_string()),
                 name: "Reader".to_string(),
+                description: None,
+                excluded_principals: vec![],
                 permissions: vec!["org.labkey.api.security.permissions.ReadPermission".to_string()],
+                source_module: None,
             }],
         };
 

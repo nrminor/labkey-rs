@@ -1,13 +1,17 @@
 //! Shared security response models used by `LabKey` security endpoints.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Container metadata returned by security and project endpoints.
+///
+/// Fields match the JS `Container` interface (`constants.ts`). All fields
+/// beyond `id` are optional because different endpoints return different
+/// subsets of the full container object.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct Container {
-    /// Container identifier.
+    /// Container identifier (GUID).
     #[serde(default)]
     pub id: Option<String>,
     /// Container path (for example, `/Home/Project/Folder`).
@@ -25,22 +29,72 @@ pub struct Container {
     /// Whether this container is the root project.
     #[serde(default)]
     pub is_project: bool,
-    /// Optional server-provided format URLs.
+    /// Active module names for this container.
+    #[serde(default)]
+    pub active_modules: Vec<String>,
+    /// Effective permission unique names for the current user (present when
+    /// requested via `includeEffectivePermissions`).
+    #[serde(default)]
+    pub effective_permissions: Vec<String>,
+    /// Folder type name string.
+    #[serde(default)]
+    pub folder_type: Option<String>,
+    /// Server-provided date/time/number format strings.
     #[serde(default)]
     pub formats: Option<ContainerFormats>,
+    /// Whether this container has a restricted active module.
+    #[serde(default)]
+    pub has_restricted_active_module: Option<bool>,
+    /// URL to the container icon.
+    #[serde(default)]
+    pub icon_href: Option<String>,
+    /// Whether this container is archived.
+    #[serde(default)]
+    pub is_archived: Option<bool>,
+    /// Whether this container is a container tab.
+    #[serde(default)]
+    pub is_container_tab: Option<bool>,
+    /// Whether this container is a workbook.
+    #[serde(default)]
+    pub is_workbook: Option<bool>,
+    /// Parent container identifier.
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    /// Parent container path.
+    #[serde(default)]
+    pub parent_path: Option<String>,
+    /// Sort order within the parent container.
+    #[serde(default)]
+    pub sort_order: Option<i64>,
+    /// Start URL for this container.
+    #[serde(default)]
+    pub start_url: Option<String>,
 }
 
-/// Container URL format fields returned by list endpoints.
+/// Date, time, and number format strings associated with a container.
+///
+/// The JS `Container` interface nests these under a `formats` object with
+/// four string fields. The server may also include other keys, so unknown
+/// fields are captured in `extra`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct ContainerFormats {
-    /// URL for this container.
+    /// Date format string (e.g. `"yyyy-MM-dd"`).
     #[serde(default)]
-    pub container_path: Option<String>,
-    /// URL for this container's children listing.
+    pub date_format: Option<String>,
+    /// Date-time format string.
     #[serde(default)]
-    pub children: Option<String>,
+    pub date_time_format: Option<String>,
+    /// Number format string.
+    #[serde(default)]
+    pub number_format: Option<String>,
+    /// Time format string.
+    #[serde(default)]
+    pub time_format: Option<String>,
+    /// Additional server-provided format keys.
+    #[serde(flatten)]
+    pub extra: std::collections::HashMap<String, serde_json::Value>,
 }
 
 /// Recursive container hierarchy entry.
@@ -81,6 +135,8 @@ pub struct ModuleProperty {
 }
 
 /// Folder type metadata returned by folder-type endpoints.
+///
+/// Matches the JS `FolderType` interface (`security/Container.ts`).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
@@ -93,50 +149,84 @@ pub struct FolderType {
     /// Optional folder type description.
     #[serde(default)]
     pub description: Option<String>,
-    /// Web parts configured for this folder type.
+    /// Active module names for this folder type.
     #[serde(default)]
-    pub web_parts: Vec<FolderTypeWebPart>,
+    pub active_modules: Vec<String>,
+    /// Default module name.
+    #[serde(default)]
+    pub default_module: Option<String>,
+    /// Whether this folder type is a workbook type.
+    #[serde(default)]
+    pub workbook_type: Option<bool>,
+    /// Preferred (removable) web parts for this folder type.
+    #[serde(default)]
+    pub preferred_web_parts: Vec<FolderTypeWebPart>,
+    /// Required (non-removable) web parts for this folder type.
+    #[serde(default)]
+    pub required_web_parts: Vec<FolderTypeWebPart>,
 }
 
 /// Web-part metadata nested under a folder type.
+///
+/// Matches the JS `FolderTypeWebParts` interface (`security/Container.ts`).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct FolderTypeWebPart {
     /// Web-part name.
     pub name: String,
-    /// Optional user-visible title.
+    /// Auto-set properties for this web part.
     #[serde(default)]
-    pub title: Option<String>,
-    /// Optional web-part location.
-    #[serde(default)]
-    pub location: Option<String>,
+    pub properties: std::collections::HashMap<String, serde_json::Value>,
 }
 
 /// Module metadata returned by module-listing endpoints.
+///
+/// Includes fields from both the JS `GetModulesModules` interface and
+/// additional server-provided fields (`label`, `version`, `properties`)
+/// that appear in real responses but are absent from the JS type definition.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct ModuleInfo {
     /// Module name.
     pub name: String,
-    /// Module display label.
+    /// Whether this module is active in the current container.
+    #[serde(default)]
+    pub active: Option<bool>,
+    /// Whether this module is enabled on the server.
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    /// Module display label (server-provided, not in JS type).
     #[serde(default)]
     pub label: Option<String>,
-    /// Module version.
+    /// Whether this module is required by the server.
+    #[serde(default)]
+    pub required: Option<bool>,
+    /// Whether this module requires site-level permissions.
+    #[serde(default)]
+    pub require_site_permission: Option<bool>,
+    /// Tab name for this module in the UI.
+    #[serde(default)]
+    pub tab_name: Option<String>,
+    /// Module version (server-provided, not in JS type).
     #[serde(default)]
     pub version: Option<String>,
-    /// Module properties keyed by property name.
+    /// Module properties keyed by property name (server-provided, not in JS type).
     #[serde(default)]
     pub properties: Vec<ModuleProperty>,
 }
 
 /// User principal metadata.
+///
+/// The JS `User` interface uses `id` as the primary identifier, while some
+/// server endpoints send `userId`. The `alias` accepts both.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct User {
-    /// User id.
+    /// User id. Accepts both `"userId"` and `"id"` from the wire.
+    #[serde(alias = "id")]
     pub user_id: i64,
     /// Email address.
     #[serde(default)]
@@ -147,13 +237,20 @@ pub struct User {
     /// Whether the user account is active.
     #[serde(default)]
     pub active: Option<bool>,
+    /// Avatar URL.
+    #[serde(default)]
+    pub avatar: Option<String>,
+    /// Phone number.
+    #[serde(default)]
+    pub phone: Option<String>,
 }
 
 /// Group principal metadata.
 ///
-/// The server sends `id` in `getGroupPerms.api` responses (matching the JS
-/// `Group` interface), but some endpoints use `groupId`. The `alias` accepts
-/// both wire keys.
+/// Matches the JS `Group` interface (`security/types.ts`). The server sends
+/// `id` in `getGroupPerms.api` responses, but some endpoints use `groupId`.
+/// The `alias` accepts both wire keys. Three deprecated JS fields (`role`,
+/// `roleLabel`, `permissions`) are intentionally omitted.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
@@ -172,21 +269,50 @@ pub struct Group {
     /// Whether the group can be edited by the current user.
     #[serde(default)]
     pub editable: Option<bool>,
+    /// Effective permission unique names for the current user on this group.
+    #[serde(default)]
+    pub effective_permissions: Vec<String>,
+    /// Nested subgroups (recursive).
+    #[serde(default)]
+    pub groups: Vec<Group>,
+    /// Whether this is a project-level group.
+    #[serde(default)]
+    pub is_project_group: Option<bool>,
+    /// Whether this is a system group.
+    #[serde(default)]
+    pub is_system_group: Option<bool>,
+    /// Role unique names assigned to this group.
+    #[serde(default)]
+    pub roles: Vec<String>,
+    /// Group type code (e.g. `"g"` for group, `"r"` for role, `"m"` for module).
+    #[serde(rename = "type", default)]
+    pub type_: Option<String>,
 }
 
 /// Role metadata.
+///
+/// Matches the JS `Role` interface (`security/Permission.ts`).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct Role {
-    /// Role unique id.
+    /// Role unique id (fully-qualified Java class name).
     #[serde(default)]
     pub unique_name: Option<String>,
     /// Role display name.
     pub name: String,
+    /// Human-readable role description.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Principal ids excluded from this role.
+    #[serde(default)]
+    pub excluded_principals: Vec<i64>,
     /// Permissions assigned to this role.
     #[serde(default)]
     pub permissions: Vec<RolePermission>,
+    /// Module that defines this role.
+    #[serde(default)]
+    pub source_module: Option<String>,
 }
 
 /// Permission metadata nested in role responses.
@@ -204,6 +330,12 @@ pub struct RolePermission {
     pub unique_name: Option<String>,
     /// Permission display name.
     pub name: String,
+    /// Human-readable permission description.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Module that defines this permission.
+    #[serde(default)]
+    pub source_module: Option<String>,
 }
 
 /// Securable resource metadata.
@@ -250,30 +382,43 @@ pub struct SecurableResource {
 /// Despite the field name, `user_id` is a principal id that can refer to
 /// either a user or a group — the `LabKey` security model treats both as
 /// principals.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct PolicyAssignment {
     /// Principal id (user or group).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_id: Option<i64>,
     /// Fully-qualified role class name assigned to this principal
     /// (e.g. `"org.labkey.api.security.roles.EditorRole"`).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
 }
 
 /// Security policy metadata.
-#[derive(Debug, Clone, Deserialize)]
+///
+/// Matches the JS `Policy` interface (`security/Policy.ts`). Derives both
+/// `Deserialize` (for `get_policy` responses) and `Serialize` (for
+/// `save_policy` requests). The `requested_resource_id` field is a
+/// client-side annotation injected by `get_policy` and is skipped during
+/// serialization.
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct Policy {
     /// Policy resource id.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resource_id: Option<String>,
     /// Resource id requested by the caller when policy inheritance is resolved.
-    #[serde(default)]
+    /// This is a client-side annotation, not sent to the server.
+    #[serde(default, skip_serializing)]
     pub requested_resource_id: Option<String>,
+    /// Last modification timestamp (ISO date string).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified: Option<String>,
+    /// Last modification timestamp in epoch milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified_millis: Option<i64>,
     /// Policy assignments.
     #[serde(default)]
     pub assignments: Vec<PolicyAssignment>,
@@ -287,18 +432,51 @@ mod tests {
     };
 
     #[test]
-    fn container_maps_type_field() {
+    fn container_deserializes_full_js_shape() {
         let value = serde_json::json!({
             "id": "f123",
             "path": "/Home/Project",
             "title": "Project",
             "name": "Project",
             "type": "Folder",
-            "isProject": true
+            "isProject": true,
+            "activeModules": ["Core", "Study"],
+            "effectivePermissions": ["org.labkey.api.security.permissions.ReadPermission"],
+            "folderType": "Study",
+            "formats": {
+                "dateFormat": "yyyy-MM-dd",
+                "dateTimeFormat": "yyyy-MM-dd HH:mm",
+                "numberFormat": "#,##0.##",
+                "timeFormat": "HH:mm:ss"
+            },
+            "hasRestrictedActiveModule": false,
+            "iconHref": "/icons/folder.png",
+            "isArchived": false,
+            "isContainerTab": false,
+            "isWorkbook": true,
+            "parentId": "parent-abc",
+            "parentPath": "/Home",
+            "sortOrder": 3,
+            "startUrl": "/Home/Project/project-begin.view"
         });
         let container: Container = serde_json::from_value(value).expect("valid container");
         assert_eq!(container.type_.as_deref(), Some("Folder"));
         assert!(container.is_project);
+        assert_eq!(container.active_modules, vec!["Core", "Study"]);
+        assert_eq!(container.effective_permissions.len(), 1);
+        assert_eq!(container.folder_type.as_deref(), Some("Study"));
+        assert!(container.formats.is_some());
+        let formats = container.formats.expect("formats should be present");
+        assert_eq!(formats.date_format.as_deref(), Some("yyyy-MM-dd"));
+        assert_eq!(formats.time_format.as_deref(), Some("HH:mm:ss"));
+        assert_eq!(container.has_restricted_active_module, Some(false));
+        assert_eq!(container.icon_href.as_deref(), Some("/icons/folder.png"));
+        assert_eq!(container.is_archived, Some(false));
+        assert_eq!(container.is_container_tab, Some(false));
+        assert_eq!(container.is_workbook, Some(true));
+        assert_eq!(container.parent_id.as_deref(), Some("parent-abc"));
+        assert_eq!(container.parent_path.as_deref(), Some("/Home"));
+        assert_eq!(container.sort_order, Some(3));
     }
 
     #[test]
@@ -324,12 +502,19 @@ mod tests {
     #[test]
     fn container_formats_deserializes() {
         let value = serde_json::json!({
-            "containerPath": "/project.url",
-            "children": "/project/children.url"
+            "dateFormat": "yyyy-MM-dd",
+            "dateTimeFormat": "yyyy-MM-dd HH:mm",
+            "numberFormat": "#,##0.##",
+            "timeFormat": "HH:mm:ss"
         });
         let formats: ContainerFormats = serde_json::from_value(value).expect("valid formats");
-        assert_eq!(formats.container_path.as_deref(), Some("/project.url"));
-        assert_eq!(formats.children.as_deref(), Some("/project/children.url"));
+        assert_eq!(formats.date_format.as_deref(), Some("yyyy-MM-dd"));
+        assert_eq!(
+            formats.date_time_format.as_deref(),
+            Some("yyyy-MM-dd HH:mm")
+        );
+        assert_eq!(formats.number_format.as_deref(), Some("#,##0.##"));
+        assert_eq!(formats.time_format.as_deref(), Some("HH:mm:ss"));
     }
 
     #[test]
@@ -431,10 +616,15 @@ mod tests {
 
     #[test]
     fn folder_type_deserializes_minimal_fixture() {
-        let value = serde_json::json!({"name": "Collaboration", "webParts": []});
+        let value = serde_json::json!({
+            "name": "Collaboration",
+            "preferredWebParts": [],
+            "requiredWebParts": []
+        });
         let folder_type: FolderType = serde_json::from_value(value).expect("valid folder type");
         assert_eq!(folder_type.name, "Collaboration");
-        assert!(folder_type.web_parts.is_empty());
+        assert!(folder_type.preferred_web_parts.is_empty());
+        assert!(folder_type.required_web_parts.is_empty());
     }
 
     #[test]
@@ -451,5 +641,155 @@ mod tests {
             assignment.role,
             Some("org.labkey.api.security.roles.EditorRole".to_string())
         );
+    }
+
+    #[test]
+    fn group_deserializes_full_js_shape() {
+        let value = serde_json::json!({
+            "id": 42,
+            "name": "Developers",
+            "effectivePermissions": ["org.labkey.api.security.permissions.ReadPermission"],
+            "groups": [{"id": 99, "name": "SubGroup"}],
+            "isProjectGroup": true,
+            "isSystemGroup": false,
+            "roles": ["org.labkey.security.roles.EditorRole"],
+            "type": "g"
+        });
+        let group: Group = serde_json::from_value(value).expect("valid group");
+        assert_eq!(group.group_id, 42);
+        assert_eq!(group.effective_permissions.len(), 1);
+        assert_eq!(group.groups.len(), 1);
+        assert_eq!(group.groups[0].name, "SubGroup");
+        assert_eq!(group.is_project_group, Some(true));
+        assert_eq!(group.is_system_group, Some(false));
+        assert_eq!(group.roles, vec!["org.labkey.security.roles.EditorRole"]);
+        assert_eq!(group.type_.as_deref(), Some("g"));
+    }
+
+    #[test]
+    fn role_deserializes_full_js_shape() {
+        let value = serde_json::json!({
+            "uniqueName": "org.labkey.security.roles.EditorRole",
+            "name": "Editor",
+            "description": "Can edit data",
+            "excludedPrincipals": [1001, 1002],
+            "permissions": [{
+                "uniqueName": "org.labkey.api.security.permissions.ReadPermission",
+                "name": "Read",
+                "description": "Can read data",
+                "sourceModule": "Core"
+            }],
+            "sourceModule": "Core"
+        });
+        let role: Role = serde_json::from_value(value).expect("valid role");
+        assert_eq!(role.description.as_deref(), Some("Can edit data"));
+        assert_eq!(role.excluded_principals, vec![1001, 1002]);
+        assert_eq!(role.source_module.as_deref(), Some("Core"));
+        assert_eq!(
+            role.permissions[0].description.as_deref(),
+            Some("Can read data")
+        );
+        assert_eq!(role.permissions[0].source_module.as_deref(), Some("Core"));
+    }
+
+    #[test]
+    fn policy_deserializes_full_js_shape() {
+        let value = serde_json::json!({
+            "resourceId": "resource-1",
+            "requestedResourceId": "requested-1",
+            "modified": "2026-03-05T12:00:00Z",
+            "modifiedMillis": 1_772_870_400_000_i64,
+            "assignments": [{
+                "role": "org.labkey.security.roles.EditorRole",
+                "userId": 1001
+            }]
+        });
+        let policy: Policy = serde_json::from_value(value).expect("valid policy");
+        assert_eq!(policy.modified.as_deref(), Some("2026-03-05T12:00:00Z"));
+        assert_eq!(policy.modified_millis, Some(1_772_870_400_000));
+        assert_eq!(policy.assignments.len(), 1);
+    }
+
+    #[test]
+    fn policy_serializes_without_requested_resource_id() {
+        let policy = Policy {
+            resource_id: Some("resource-1".to_string()),
+            requested_resource_id: Some("should-be-skipped".to_string()),
+            modified: None,
+            modified_millis: None,
+            assignments: vec![PolicyAssignment {
+                user_id: Some(1001),
+                role: Some("org.labkey.security.roles.EditorRole".to_string()),
+            }],
+        };
+        let json = serde_json::to_value(&policy).expect("serialize policy");
+        assert!(json.get("requestedResourceId").is_none());
+        assert_eq!(json["resourceId"], "resource-1");
+        assert_eq!(json["assignments"][0]["userId"], 1001);
+    }
+
+    #[test]
+    fn user_deserializes_full_js_shape() {
+        let value = serde_json::json!({
+            "id": 42,
+            "email": "user@example.com",
+            "displayName": "Test User",
+            "active": true,
+            "avatar": "/avatars/42.png",
+            "phone": "555-0100"
+        });
+        let user: User = serde_json::from_value(value).expect("valid user");
+        assert_eq!(user.user_id, 42);
+        assert_eq!(user.avatar.as_deref(), Some("/avatars/42.png"));
+        assert_eq!(user.phone.as_deref(), Some("555-0100"));
+    }
+
+    #[test]
+    fn folder_type_deserializes_full_js_shape() {
+        let value = serde_json::json!({
+            "name": "Study",
+            "label": "Study Folder",
+            "description": "For clinical studies",
+            "activeModules": ["Study", "Pipeline"],
+            "defaultModule": "Study",
+            "workbookType": false,
+            "preferredWebParts": [
+                {"name": "Study Overview", "properties": {"showHeader": true}}
+            ],
+            "requiredWebParts": [
+                {"name": "Data Pipeline", "properties": {}}
+            ]
+        });
+        let ft: FolderType = serde_json::from_value(value).expect("valid folder type");
+        assert_eq!(ft.active_modules, vec!["Study", "Pipeline"]);
+        assert_eq!(ft.default_module.as_deref(), Some("Study"));
+        assert_eq!(ft.workbook_type, Some(false));
+        assert_eq!(ft.preferred_web_parts.len(), 1);
+        assert_eq!(ft.preferred_web_parts[0].name, "Study Overview");
+        assert!(
+            ft.preferred_web_parts[0]
+                .properties
+                .contains_key("showHeader")
+        );
+        assert_eq!(ft.required_web_parts.len(), 1);
+        assert_eq!(ft.required_web_parts[0].name, "Data Pipeline");
+    }
+
+    #[test]
+    fn module_info_deserializes_full_shape() {
+        let value = serde_json::json!({
+            "name": "Study",
+            "active": true,
+            "enabled": true,
+            "required": false,
+            "requireSitePermission": false,
+            "tabName": "Study"
+        });
+        let mi: ModuleInfo = serde_json::from_value(value).expect("valid module info");
+        assert_eq!(mi.active, Some(true));
+        assert_eq!(mi.enabled, Some(true));
+        assert_eq!(mi.required, Some(false));
+        assert_eq!(mi.require_site_permission, Some(false));
+        assert_eq!(mi.tab_name.as_deref(), Some("Study"));
     }
 }

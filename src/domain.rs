@@ -52,6 +52,37 @@ impl DomainKind {
     }
 }
 
+/// Conditional format rule applied to a domain field.
+///
+/// Matches the Java `ConditionalFormat` class
+/// (`domain/ConditionalFormat.java`). The `filter` field is a URL-encoded
+/// filter string on the wire (e.g. `"~eq=val&~gt=5"`); Java parses this
+/// into `ConditionalFormatFilter` objects, but we keep it as a raw string
+/// to avoid coupling to the filter URL encoding format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct ConditionalFormat {
+    /// URL-encoded filter expression.
+    #[serde(default)]
+    pub filter: Option<String>,
+    /// Text color (CSS hex string, e.g. `"#FF0000"`).
+    #[serde(default)]
+    pub text_color: Option<String>,
+    /// Background color (CSS hex string).
+    #[serde(default)]
+    pub background_color: Option<String>,
+    /// Whether to render text in bold.
+    #[serde(default)]
+    pub bold: bool,
+    /// Whether to render text in italic.
+    #[serde(default)]
+    pub italic: bool,
+    /// Whether to render text with strikethrough.
+    #[serde(default)]
+    pub strikethrough: bool,
+}
+
 /// A field definition inside a domain design.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -106,6 +137,29 @@ pub struct DomainField {
     /// Semantic type URI.
     #[serde(default)]
     pub semantic_type: Option<String>,
+    /// Whether this field is hidden from the default view.
+    #[serde(default)]
+    pub hidden: Option<bool>,
+    /// Protected Health Information level (e.g. `"NotPHI"`, `"Limited"`,
+    /// `"PHI"`, `"Restricted"`). Java-only; the JS client has no typed
+    /// equivalent.
+    #[serde(rename = "PHI", default)]
+    pub phi: Option<String>,
+    /// Whether this field is a measure (for charting/aggregation).
+    #[serde(default)]
+    pub measure: Option<bool>,
+    /// Whether this field is a dimension (for charting/grouping).
+    #[serde(default)]
+    pub dimension: Option<bool>,
+    /// Whether missing-value indicators are enabled for this field.
+    #[serde(default)]
+    pub mv_enabled: Option<bool>,
+    /// Derivation data scope for derived fields.
+    #[serde(default)]
+    pub derivation_data_scope: Option<String>,
+    /// Conditional formatting rules applied to this field.
+    #[serde(default)]
+    pub conditional_formats: Vec<ConditionalFormat>,
     /// Additional server-provided keys.
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
@@ -1112,6 +1166,13 @@ mod tests {
             required: Some(true),
             search_terms: None,
             semantic_type: None,
+            hidden: None,
+            phi: None,
+            measure: None,
+            dimension: None,
+            mv_enabled: None,
+            derivation_data_scope: None,
+            conditional_formats: vec![],
             extra,
         };
 
@@ -1311,5 +1372,59 @@ mod tests {
             }
             other => panic!("expected unexpected response error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn domain_field_deserializes_java_typed_fields() {
+        let value = serde_json::json!({
+            "name": "BloodPressure",
+            "rangeURI": "int",
+            "hidden": true,
+            "PHI": "Limited",
+            "measure": true,
+            "dimension": false,
+            "mvEnabled": true,
+            "derivationDataScope": "ChildOnly",
+            "conditionalFormats": [{
+                "filter": "~gt=120",
+                "textColor": "#FF0000",
+                "backgroundColor": "#FFEEEE",
+                "bold": true,
+                "italic": false,
+                "strikethrough": false
+            }]
+        });
+        let field: DomainField = serde_json::from_value(value).expect("valid domain field");
+        assert_eq!(field.hidden, Some(true));
+        assert_eq!(field.phi.as_deref(), Some("Limited"));
+        assert_eq!(field.measure, Some(true));
+        assert_eq!(field.dimension, Some(false));
+        assert_eq!(field.mv_enabled, Some(true));
+        assert_eq!(field.derivation_data_scope.as_deref(), Some("ChildOnly"));
+        assert_eq!(field.conditional_formats.len(), 1);
+        let cf = &field.conditional_formats[0];
+        assert_eq!(cf.filter.as_deref(), Some("~gt=120"));
+        assert_eq!(cf.text_color.as_deref(), Some("#FF0000"));
+        assert_eq!(cf.background_color.as_deref(), Some("#FFEEEE"));
+        assert!(cf.bold);
+        assert!(!cf.italic);
+        assert!(!cf.strikethrough);
+    }
+
+    #[test]
+    fn conditional_format_round_trips_serde() {
+        let cf = ConditionalFormat {
+            filter: Some("~eq=100".to_string()),
+            text_color: Some("#000000".to_string()),
+            background_color: None,
+            bold: false,
+            italic: true,
+            strikethrough: false,
+        };
+        let json = serde_json::to_value(&cf).expect("serialize");
+        let restored: ConditionalFormat = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(restored.filter.as_deref(), Some("~eq=100"));
+        assert!(restored.italic);
+        assert!(!restored.bold);
     }
 }

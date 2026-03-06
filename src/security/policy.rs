@@ -33,8 +33,10 @@ pub struct GetPolicyResponse {
 #[derive(Debug, Clone, bon::Builder)]
 #[non_exhaustive]
 pub struct SavePolicyOptions {
-    /// Policy object to persist.
-    pub policy: serde_json::Value,
+    /// Policy object to persist. The `requested_resource_id` field is
+    /// automatically excluded from serialization (it is a client-side
+    /// annotation, not part of the server wire format).
+    pub policy: Policy,
     /// Optional container override for this request.
     pub container_path: Option<String>,
 }
@@ -106,20 +108,6 @@ fn extract_policy(response: &serde_json::Value) -> Result<GetPolicyEnvelope, Lab
             text: format!("invalid getPolicy response: {response}"),
         }
     })
-}
-
-fn normalize_save_policy_body(policy: serde_json::Value) -> serde_json::Value {
-    match policy {
-        serde_json::Value::Object(mut object)
-            if object.len() == 1 && object.get("policy").is_some() =>
-        {
-            object
-                .remove("policy")
-                .unwrap_or(serde_json::Value::Object(object))
-        }
-        serde_json::Value::Object(object) => serde_json::Value::Object(object),
-        other => other,
-    }
 }
 
 impl LabkeyClient {
@@ -204,15 +192,23 @@ impl LabkeyClient {
     /// #     "/MyProject",
     /// # );
     /// # let client = labkey_rs::LabkeyClient::new(config)?;
-    /// use labkey_rs::security::SavePolicyOptions;
+    /// use labkey_rs::security::{Policy, PolicyAssignment, SavePolicyOptions};
     ///
     /// let _ = client
     ///     .save_policy(
     ///         SavePolicyOptions::builder()
-    ///             .policy(serde_json::json!({
-    ///                 "resourceId": "resource-1",
-    ///                 "assignments": []
-    ///             }))
+    ///             .policy(Policy {
+    ///                 resource_id: Some("resource-1".to_string()),
+    ///                 requested_resource_id: None,
+    ///                 modified: None,
+    ///                 modified_millis: None,
+    ///                 assignments: vec![PolicyAssignment {
+    ///                     user_id: Some(1001),
+    ///                     role: Some(
+    ///                         "org.labkey.security.roles.EditorRole".to_string(),
+    ///                     ),
+    ///                 }],
+    ///             })
     ///             .build(),
     ///     )
     ///     .await?;
@@ -228,8 +224,7 @@ impl LabkeyClient {
             "savePolicy.api",
             options.container_path.as_deref(),
         );
-        let body = normalize_save_policy_body(options.policy);
-        self.post(url, &body).await
+        self.post(url, &options.policy).await
     }
 
     /// Delete the explicit security policy for a resource.
@@ -366,47 +361,54 @@ mod tests {
     }
 
     #[test]
-    fn normalize_save_policy_body_unwraps_policy_key() {
-        let wrapped = serde_json::json!({
-            "policy": {
-                "resourceId": "resource-1",
-                "assignments": []
-            }
-        });
+    fn save_policy_body_serializes_typed_policy_correctly() {
+        use crate::security::PolicyAssignment;
 
-        let normalized = normalize_save_policy_body(wrapped);
+        let policy = Policy {
+            resource_id: Some("resource-1".to_string()),
+            requested_resource_id: Some("should-be-skipped".to_string()),
+            modified: Some("2026-03-05T12:00:00Z".to_string()),
+            modified_millis: Some(1_772_870_400_000),
+            assignments: vec![PolicyAssignment {
+                user_id: Some(1001),
+                role: Some("org.labkey.security.roles.EditorRole".to_string()),
+            }],
+        };
+
+        let json = serde_json::to_value(&policy).expect("serialize policy");
+        // requested_resource_id is skip_serializing — must be absent
+        assert!(json.get("requestedResourceId").is_none());
+        assert_eq!(json["resourceId"], "resource-1");
+        assert_eq!(json["modified"], "2026-03-05T12:00:00Z");
+        assert_eq!(json["modifiedMillis"], 1_772_870_400_000_i64);
+        assert_eq!(json["assignments"][0]["userId"], 1001);
         assert_eq!(
-            normalized,
-            serde_json::json!({
-                "resourceId": "resource-1",
-                "assignments": []
-            })
+            json["assignments"][0]["role"],
+            "org.labkey.security.roles.EditorRole"
         );
     }
 
     #[test]
-    fn normalize_save_policy_body_preserves_plain_policy_object() {
-        let plain = serde_json::json!({
-            "resourceId": "resource-1",
-            "assignments": []
-        });
+    fn save_policy_body_omits_none_fields() {
+        let policy = Policy {
+            resource_id: Some("resource-1".to_string()),
+            requested_resource_id: None,
+            modified: None,
+            modified_millis: None,
+            assignments: vec![],
+        };
 
-        let normalized = normalize_save_policy_body(plain.clone());
-        assert_eq!(normalized, plain);
-    }
-
-    #[test]
-    fn normalize_save_policy_body_preserves_objects_with_additional_fields() {
-        let wrapped = serde_json::json!({
-            "policy": {
-                "resourceId": "resource-1",
-                "assignments": []
-            },
-            "auditComment": "keep me"
-        });
-
-        let normalized = normalize_save_policy_body(wrapped.clone());
-        assert_eq!(normalized, wrapped);
+        let json = serde_json::to_value(&policy).expect("serialize policy");
+        assert!(json.get("modified").is_none());
+        assert!(json.get("modifiedMillis").is_none());
+        assert!(json.get("requestedResourceId").is_none());
+        assert_eq!(json["resourceId"], "resource-1");
+        assert!(
+            json["assignments"]
+                .as_array()
+                .expect("assignments should be an array")
+                .is_empty()
+        );
     }
 
     #[test]

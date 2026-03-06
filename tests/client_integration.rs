@@ -38,13 +38,15 @@ use labkey_rs::report::{
     GetSessionsOptions,
 };
 use labkey_rs::security::{
-    AddGroupMembersOptions, CreateGroupOptions, CreateNewUserOptions, DeleteGroupOptions,
-    DeletePolicyOptions, DeleteUserOptions, EnsureLoginOptions, GetFolderTypesOptions,
-    GetGroupPermissionsOptions, GetGroupsForCurrentUserOptions, GetModulesOptions,
-    GetPolicyOptions, GetReadableContainersOptions, GetRolesOptions, GetSecurableResourcesOptions,
+    AddGroupMembersOptions, CreateContainerOptions, CreateGroupOptions, CreateNewUserOptions,
+    DeleteContainerOptions, DeleteGroupOptions, DeletePolicyOptions, DeleteUserOptions,
+    EnsureLoginOptions, GetContainersOptions, GetFolderTypesOptions, GetGroupPermissionsOptions,
+    GetGroupsForCurrentUserOptions, GetModulesOptions, GetPolicyOptions,
+    GetReadableContainersOptions, GetRolesOptions, GetSecurableResourcesOptions,
     GetUserPermissionsOptions, GetUsersOptions, GetUsersWithPermissionsOptions, ImpersonateTarget,
-    ImpersonateUserOptions, LogoutOptions, MoveContainerOptions, RemoveGroupMembersOptions,
-    RenameGroupOptions, SavePolicyOptions, StopImpersonatingOptions, WhoAmIOptions,
+    ImpersonateUserOptions, LogoutOptions, MoveContainerOptions, Policy, RemoveGroupMembersOptions,
+    RenameContainerOptions, RenameGroupOptions, SavePolicyOptions, StopImpersonatingOptions,
+    WhoAmIOptions,
 };
 use labkey_rs::specimen::{
     AddSpecimensToRequestOptions, AddVialsToRequestOptions, CancelRequestOptions,
@@ -2675,7 +2677,11 @@ async fn get_folder_types_posts_and_deserializes_folder_map() {
             "Study": {
                 "name": "Study",
                 "label": "Study Folder",
-                "webParts": []
+                "activeModules": ["Study", "Pipeline"],
+                "defaultModule": "Study",
+                "workbookType": false,
+                "preferredWebParts": [{"name": "Study Overview", "properties": {}}],
+                "requiredWebParts": []
             }
         })))
         .mount(&server)
@@ -3901,12 +3907,12 @@ async fn save_policy_sends_expected_request_shape() {
         .save_policy(
             SavePolicyOptions::builder()
                 .container_path("/Alt/Container".to_string())
-                .policy(serde_json::json!({
-                    "policy": {
-                        "resourceId": "resource-1",
-                        "assignments": []
-                    }
-                }))
+                .policy(
+                    Policy::builder()
+                        .resource_id("resource-1".to_string())
+                        .assignments(vec![])
+                        .build(),
+                )
                 .build(),
         )
         .await
@@ -5654,4 +5660,296 @@ async fn import_data_succeeds_without_row_count_in_response() {
 
     assert!(response.success);
     assert_eq!(response.row_count, None);
+}
+
+// ---------------------------------------------------------------------------
+// Container management integration tests (T10/T11)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_container_posts_name_and_optional_fields() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/core-createContainer.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "name": "NewFolder",
+            "folderType": "Study",
+            "isWorkbook": false
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "abc-123",
+            "name": "NewFolder",
+            "path": "/MyProject/MyFolder/NewFolder",
+            "title": "NewFolder",
+            "type": "folder",
+            "isProject": false,
+            "folderType": "Study"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let container = client
+        .create_container(
+            CreateContainerOptions::builder()
+                .name("NewFolder".to_string())
+                .folder_type("Study".to_string())
+                .is_workbook(false)
+                .build(),
+        )
+        .await
+        .expect("create_container should succeed");
+
+    assert_eq!(container.id.as_deref(), Some("abc-123"));
+    assert_eq!(container.name.as_deref(), Some("NewFolder"));
+    assert_eq!(
+        container.path.as_deref(),
+        Some("/MyProject/MyFolder/NewFolder")
+    );
+    assert_eq!(container.folder_type.as_deref(), Some("Study"));
+    assert!(!container.is_project);
+}
+
+#[tokio::test]
+async fn create_container_with_container_path_override() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Other/Project/core-createContainer.api"))
+        .and(body_json(serde_json::json!({
+            "name": "Workbook1",
+            "type": "workbook",
+            "title": "My Workbook",
+            "description": "A test workbook",
+            "isWorkbook": true
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "wb-456",
+            "name": "Workbook1",
+            "path": "/Other/Project/Workbook1",
+            "isWorkbook": true,
+            "isProject": false
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let container = client
+        .create_container(
+            CreateContainerOptions::builder()
+                .name("Workbook1".to_string())
+                .container_path("/Other/Project".to_string())
+                .container_type("workbook".to_string())
+                .title("My Workbook".to_string())
+                .description("A test workbook".to_string())
+                .is_workbook(true)
+                .build(),
+        )
+        .await
+        .expect("create_container with override should succeed");
+
+    assert_eq!(container.id.as_deref(), Some("wb-456"));
+    assert_eq!(container.is_workbook, Some(true));
+}
+
+#[tokio::test]
+async fn delete_container_posts_comment_and_uses_container_path() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/Target/Folder/core-deleteContainer.api"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "comment": "No longer needed"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response: serde_json::Value = client
+        .delete_container(
+            DeleteContainerOptions::builder()
+                .container_path("/Target/Folder".to_string())
+                .comment("No longer needed".to_string())
+                .build(),
+        )
+        .await
+        .expect("delete_container should succeed");
+
+    assert_eq!(response["success"], true);
+}
+
+#[tokio::test]
+async fn delete_container_without_comment_sends_empty_body() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/core-deleteContainer.api"))
+        .and(body_json(serde_json::json!({})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let _response = client
+        .delete_container(DeleteContainerOptions::builder().build())
+        .await
+        .expect("delete_container without comment should succeed");
+}
+
+#[tokio::test]
+async fn rename_container_posts_name_and_alias() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/OldFolder/admin-renameContainer.api"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "name": "NewFolder",
+            "addAlias": true
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "folder-789",
+            "name": "NewFolder",
+            "path": "/MyProject/NewFolder",
+            "isProject": false
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let container = client
+        .rename_container(
+            RenameContainerOptions::builder()
+                .container_path("/MyProject/OldFolder".to_string())
+                .name("NewFolder".to_string())
+                .add_alias(true)
+                .build(),
+        )
+        .await
+        .expect("rename_container should succeed");
+
+    assert_eq!(container.id.as_deref(), Some("folder-789"));
+    assert_eq!(container.name.as_deref(), Some("NewFolder"));
+    assert_eq!(container.path.as_deref(), Some("/MyProject/NewFolder"));
+}
+
+#[tokio::test]
+async fn rename_container_rejects_missing_name_and_title() {
+    let client = test_client("https://labkey.example.com");
+
+    let result = client
+        .rename_container(RenameContainerOptions::builder().build())
+        .await;
+
+    assert!(
+        result.is_err(),
+        "rename_container should reject when both name and title are missing"
+    );
+    let err = result.expect_err("should be InvalidInput");
+    assert!(
+        matches!(err, LabkeyError::InvalidInput(_)),
+        "expected InvalidInput, got: {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn get_containers_sends_query_params_and_deserializes_single_container() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/MyProject/MyFolder/project-getContainers.api"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(query_param("includeSubfolders", "true"))
+        .and(query_param("container", "/Home"))
+        .and(query_param_is_missing("multipleContainers"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "root-1",
+            "name": "Home",
+            "path": "/Home",
+            "type": "project",
+            "children": [
+                {
+                    "id": "child-1",
+                    "name": "SubFolder",
+                    "path": "/Home/SubFolder",
+                    "children": []
+                }
+            ]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let containers = client
+        .get_containers(
+            GetContainersOptions::builder()
+                .containers(vec!["/Home".to_string()])
+                .include_subfolders(true)
+                .build(),
+        )
+        .await
+        .expect("get_containers should succeed");
+
+    assert_eq!(containers.len(), 1);
+    assert_eq!(containers[0].id.as_deref(), Some("root-1"));
+    assert_eq!(containers[0].name.as_deref(), Some("Home"));
+    assert_eq!(containers[0].children.len(), 1);
+    assert_eq!(containers[0].children[0].name.as_deref(), Some("SubFolder"));
+}
+
+#[tokio::test]
+async fn get_containers_with_multiple_containers_sends_flag() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/MyProject/MyFolder/project-getContainers.api"))
+        .and(query_param("multipleContainers", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "containers": [
+                {
+                    "id": "c1",
+                    "name": "First",
+                    "path": "/First",
+                    "children": []
+                },
+                {
+                    "id": "c2",
+                    "name": "Second",
+                    "path": "/Second",
+                    "children": []
+                }
+            ]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let containers = client
+        .get_containers(
+            GetContainersOptions::builder()
+                .containers(vec!["/First".to_string(), "/Second".to_string()])
+                .build(),
+        )
+        .await
+        .expect("get_containers with multiple should succeed");
+
+    assert_eq!(containers.len(), 2);
+    assert_eq!(containers[0].name.as_deref(), Some("First"));
+    assert_eq!(containers[1].name.as_deref(), Some("Second"));
 }
