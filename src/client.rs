@@ -287,6 +287,19 @@ impl LabkeyClient {
         Ok(builder.build()?)
     }
 
+    fn build_form_post_request(
+        &self,
+        client: &reqwest::Client,
+        url: Url,
+        params: &[(String, String)],
+        options: &RequestOptions,
+    ) -> Result<reqwest::Request, LabkeyError> {
+        let builder = client.post(url).form(params);
+        let builder = self.prepare_request(builder);
+        let builder = Self::apply_request_options(builder, options);
+        Ok(builder.build()?)
+    }
+
     fn build_post_request_without_body(
         &self,
         client: &reqwest::Client,
@@ -355,6 +368,26 @@ impl LabkeyClient {
     ) -> Result<T, LabkeyError> {
         let client = self.client_for_options(options)?;
         let request = self.build_json_post_request(&client, url, body, options)?;
+        let response = client.execute(request).await?;
+        self.handle_response(response, &options.accepted_statuses)
+            .await
+    }
+
+    /// Send a POST request with form-encoded key-value pairs and deserialize
+    /// the JSON response.
+    ///
+    /// This mirrors the JS client's behavior when `method: 'POST'` is set on
+    /// query read endpoints: the same parameters that would normally be URL
+    /// query string values are sent as an `application/x-www-form-urlencoded`
+    /// body instead.
+    pub(crate) async fn post_form<T: serde::de::DeserializeOwned>(
+        &self,
+        url: Url,
+        params: &[(String, String)],
+    ) -> Result<T, LabkeyError> {
+        let options = RequestOptions::default();
+        let client = self.client_for_options(&options)?;
+        let request = self.build_form_post_request(&client, url, params, &options)?;
         let response = client.execute(request).await?;
         self.handle_response(response, &options.accepted_statuses)
             .await

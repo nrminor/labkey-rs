@@ -28,9 +28,10 @@ use labkey_rs::query::{
     GetDataAggregate, GetDataFilter, GetDataOptions, GetDataPivot, GetDataSort,
     GetDataSortDirection, GetDataSource, GetDataTransform, GetDataViewsOptions, GetQueriesOptions,
     GetQueryDetailsOptions, GetQueryViewsOptions, GetSchemasOptions, ImportDataOptions,
-    ImportDataSource, InsertOption, InsertRowsOptions, MoveRowsOptions, SaveQueryViewsOptions,
-    SaveRowsCommand, SaveRowsOptions, SaveSessionViewOptions, SelectDistinctOptions,
-    SelectRowsOptions, TruncateTableOptions, UpdateRowsOptions, ValidateQueryOptions,
+    ImportDataSource, InsertOption, InsertRowsOptions, MoveRowsOptions, RequestMethod,
+    SaveQueryViewsOptions, SaveRowsCommand, SaveRowsOptions, SaveSessionViewOptions,
+    SelectDistinctOptions, SelectRowsOptions, ShowRows, TruncateTableOptions, UpdateRowsOptions,
+    ValidateQueryOptions,
 };
 use labkey_rs::report::{
     CreateSessionOptions, DeleteSessionOptions, ExecuteFunctionOptions, ExecuteOptions,
@@ -5065,4 +5066,356 @@ async fn specimen_missing_envelopes_map_to_unexpected_response_with_context() {
         }
         other => panic!("unexpected error variant: {other:?}"),
     }
+}
+
+// --- select_rows: dataRegionName, showRows, method ---
+
+#[tokio::test]
+async fn select_rows_uses_custom_data_region_name_as_param_prefix() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/MyProject/MyFolder/query-getQuery.api"))
+        .and(query_param("dataRegionName", "QWP"))
+        .and(query_param("schemaName", "lists"))
+        .and(query_param("QWP.queryName", "People"))
+        .and(query_param("QWP.columns", "Name,Age"))
+        .and(query_param("QWP.sort", "Name"))
+        .and(query_param("QWP.viewName", "MyView"))
+        .and(query_param("apiVersion", "17.1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "queryName": "People",
+            "rowCount": 0,
+            "rows": []
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .select_rows(
+            SelectRowsOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .data_region_name("QWP".to_string())
+                .columns(vec!["Name".into(), "Age".into()])
+                .sort("Name".to_string())
+                .view_name("MyView".to_string())
+                .build(),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(response.row_count, 0);
+}
+
+#[tokio::test]
+async fn select_rows_defaults_data_region_name_to_query() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/MyProject/MyFolder/query-getQuery.api"))
+        .and(query_param("dataRegionName", "query"))
+        .and(query_param("query.queryName", "People"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "rowCount": 0,
+            "rows": []
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    client
+        .select_rows(
+            SelectRowsOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .build(),
+        )
+        .await
+        .expect("request should succeed");
+}
+
+#[tokio::test]
+async fn select_rows_custom_data_region_prefixes_filters_and_params() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/MyProject/MyFolder/query-getQuery.api"))
+        .and(query_param("dataRegionName", "QWP"))
+        .and(query_param("QWP.queryName", "People"))
+        .and(query_param("QWP.Name~eq", "Alice"))
+        .and(query_param("QWP.param.myParam", "myValue"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "rowCount": 0,
+            "rows": []
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    client
+        .select_rows(
+            SelectRowsOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .data_region_name("QWP".to_string())
+                .filter_array(vec![Filter::equal("Name", "Alice")])
+                .parameters(
+                    [("myParam".to_string(), "myValue".to_string())]
+                        .into_iter()
+                        .collect(),
+                )
+                .build(),
+        )
+        .await
+        .expect("request should succeed");
+}
+
+#[tokio::test]
+async fn select_rows_show_rows_all_skips_max_rows_and_offset() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/MyProject/MyFolder/query-getQuery.api"))
+        .and(query_param("query.showRows", "all"))
+        .and(query_param_is_missing("query.maxRows"))
+        .and(query_param_is_missing("query.offset"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "rowCount": 0,
+            "rows": []
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    client
+        .select_rows(
+            SelectRowsOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .show_rows(ShowRows::All)
+                .max_rows(100)
+                .offset(50)
+                .build(),
+        )
+        .await
+        .expect("request should succeed");
+}
+
+#[tokio::test]
+async fn select_rows_show_rows_selected_sends_show_rows_param() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/MyProject/MyFolder/query-getQuery.api"))
+        .and(query_param("query.showRows", "selected"))
+        .and(query_param("query.selectionKey", "my-grid"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "rowCount": 0,
+            "rows": []
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    client
+        .select_rows(
+            SelectRowsOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .show_rows(ShowRows::Selected)
+                .selection_key("my-grid".to_string())
+                .build(),
+        )
+        .await
+        .expect("request should succeed");
+}
+
+#[tokio::test]
+async fn select_rows_show_rows_none_sends_none_param() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/MyProject/MyFolder/query-getQuery.api"))
+        .and(query_param("query.showRows", "none"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "rowCount": 0,
+            "rows": []
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    client
+        .select_rows(
+            SelectRowsOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .show_rows(ShowRows::None)
+                .build(),
+        )
+        .await
+        .expect("request should succeed");
+}
+
+#[tokio::test]
+async fn select_rows_paginated_honors_max_rows_and_offset() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/MyProject/MyFolder/query-getQuery.api"))
+        .and(query_param("query.maxRows", "25"))
+        .and(query_param("query.offset", "50"))
+        .and(query_param_is_missing("query.showRows"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "rowCount": 0,
+            "rows": []
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    client
+        .select_rows(
+            SelectRowsOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .max_rows(25)
+                .offset(50)
+                .build(),
+        )
+        .await
+        .expect("request should succeed");
+}
+
+#[tokio::test]
+async fn select_rows_negative_max_rows_sends_show_rows_all_in_paginated_mode() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/MyProject/MyFolder/query-getQuery.api"))
+        .and(query_param("query.showRows", "all"))
+        .and(query_param_is_missing("query.maxRows"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "rowCount": 0,
+            "rows": []
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    client
+        .select_rows(
+            SelectRowsOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .max_rows(-1)
+                .build(),
+        )
+        .await
+        .expect("request should succeed");
+}
+
+#[tokio::test]
+async fn select_rows_method_post_sends_form_encoded_body() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/query-getQuery.api"))
+        .and(header("content-type", "application/x-www-form-urlencoded"))
+        .and(body_string_contains("schemaName=lists"))
+        .and(body_string_contains("query.queryName=People"))
+        .and(body_string_contains("apiVersion=17.1"))
+        .and(body_string_contains("dataRegionName=query"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "queryName": "People",
+            "rowCount": 0,
+            "rows": []
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .select_rows(
+            SelectRowsOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .method(RequestMethod::Post)
+                .build(),
+        )
+        .await
+        .expect("POST request should succeed");
+
+    assert_eq!(response.row_count, 0);
+}
+
+#[tokio::test]
+async fn select_rows_method_post_with_custom_data_region() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/query-getQuery.api"))
+        .and(header("content-type", "application/x-www-form-urlencoded"))
+        .and(body_string_contains("dataRegionName=QWP"))
+        .and(body_string_contains("QWP.queryName=People"))
+        .and(body_string_contains("QWP.sort=Name"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "rowCount": 0,
+            "rows": []
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    client
+        .select_rows(
+            SelectRowsOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .method(RequestMethod::Post)
+                .data_region_name("QWP".to_string())
+                .sort("Name".to_string())
+                .build(),
+        )
+        .await
+        .expect("POST with custom data region should succeed");
+}
+
+#[tokio::test]
+async fn select_rows_default_method_is_get() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/MyProject/MyFolder/query-getQuery.api"))
+        .and(query_param("schemaName", "lists"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "rowCount": 0,
+            "rows": []
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    client
+        .select_rows(
+            SelectRowsOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .build(),
+        )
+        .await
+        .expect("default GET request should succeed");
 }

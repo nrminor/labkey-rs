@@ -22,6 +22,43 @@ use crate::{
 /// Prefix used by `LabKey` for URL-valued hidden columns.
 pub const URL_COLUMN_PREFIX: &str = "_labkeyurl_";
 
+/// HTTP method for query read endpoints like [`LabkeyClient::select_rows`].
+///
+/// Defaults to [`Get`](RequestMethod::Get). The `Post` variant sends parameters
+/// as an `application/x-www-form-urlencoded` body instead of URL query string
+/// parameters, which avoids URL length limits for requests with complex filters
+/// or many columns. This follows the JS client convention; the Java client
+/// always POSTs with a JSON body, but we match JS since our parameter encoding
+/// is already JS-compatible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum RequestMethod {
+    /// Send parameters as URL query string (default).
+    #[default]
+    Get,
+    /// Send parameters as a form-encoded request body.
+    Post,
+}
+
+/// Controls which rows the server returns for query read endpoints.
+///
+/// When set to anything other than [`Paginated`](ShowRows::Paginated), the
+/// `max_rows` and `offset` options on [`SelectRowsOptions`] are ignored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ShowRows {
+    /// Return all rows, ignoring pagination.
+    All,
+    /// Return no data rows (metadata only).
+    None,
+    /// Honor `max_rows` and `offset` for pagination (default when omitted).
+    Paginated,
+    /// Return only rows in the current grid selection (requires `selection_key`).
+    Selected,
+    /// Return only rows NOT in the current grid selection (requires `selection_key`).
+    Unselected,
+}
+
 /// A cell value in a query response row.
 ///
 /// In the 17.1 response format, each column value is an object with at
@@ -237,6 +274,19 @@ pub struct SelectRowsOptions {
     pub selection_key: Option<String>,
     /// Parameters for parameterized queries.
     pub parameters: Option<HashMap<String, String>>,
+    /// Prefix for query-region parameters (e.g., filters, sorts, columns).
+    /// Defaults to `"query"` when omitted, matching the JS client's
+    /// `ensureRegionName` behavior.
+    pub data_region_name: Option<String>,
+    /// HTTP method for this request. Defaults to [`RequestMethod::Get`].
+    /// Use [`RequestMethod::Post`] to send parameters as a form-encoded body
+    /// instead of URL query string, which avoids URL length limits for
+    /// requests with complex filters or many columns.
+    pub method: Option<RequestMethod>,
+    /// Controls which rows the server returns. When set to anything other
+    /// than [`ShowRows::Paginated`], `max_rows` and `offset` are ignored.
+    /// When omitted, the server uses paginated mode by default.
+    pub show_rows: Option<ShowRows>,
 }
 
 /// Options for [`LabkeyClient::execute_sql`].
@@ -1746,9 +1796,13 @@ impl LabkeyClient {
         options: SelectRowsOptions,
     ) -> Result<SelectRowsResponse, LabkeyError> {
         let url = self.build_url("query", "getQuery.api", options.container_path.as_deref());
-        let dr = "query";
+        let dr = options
+            .data_region_name
+            .unwrap_or_else(|| "query".to_string());
+        let method = options.method.unwrap_or_default();
 
         let mut params: Vec<(String, String)> = [
+            Some(("dataRegionName".into(), dr.clone())),
             Some(("schemaName".into(), options.schema_name)),
             Some((format!("{dr}.queryName"), options.query_name)),
             Some(("apiVersion".into(), "17.1".into())),
@@ -1756,7 +1810,6 @@ impl LabkeyClient {
                 .columns
                 .map(|c| (format!("{dr}.columns"), c.join(","))),
             opt(format!("{dr}.sort"), options.sort),
-            opt(format!("{dr}.offset"), options.offset),
             opt(format!("{dr}.viewName"), options.view_name),
             opt(format!("{dr}.selectionKey"), options.selection_key),
             opt(
@@ -1771,18 +1824,44 @@ impl LabkeyClient {
             options
                 .ignore_filter
                 .and_then(|v| v.then(|| (format!("{dr}.ignoreFilter"), "1".into()))),
-            match options.max_rows {
-                Some(max) if max < 0 => Some((format!("{dr}.showRows"), "all".into())),
-                Some(max) => Some((format!("{dr}.maxRows"), max.to_string())),
-                None => None,
-            },
         ]
         .into_iter()
         .flatten()
         .collect();
 
+        // showRows / maxRows / offset interaction (JS SelectRows.ts:134-148):
+        // When showRows is absent or Paginated, honor maxRows and offset.
+        // When showRows is All/Selected/Unselected/None, send showRows directly
+        // and skip maxRows/offset entirely.
+        match options.show_rows {
+            None | Some(ShowRows::Paginated) => {
+                if let Some(offset) = options.offset {
+                    params.push((format!("{dr}.offset"), offset.to_string()));
+                }
+                match options.max_rows {
+                    Some(max) if max < 0 => {
+                        params.push((format!("{dr}.showRows"), "all".into()));
+                    }
+                    Some(max) => {
+                        params.push((format!("{dr}.maxRows"), max.to_string()));
+                    }
+                    None => {}
+                }
+            }
+            Some(show) => {
+                let value = match show {
+                    ShowRows::All => "all",
+                    ShowRows::None => "none",
+                    ShowRows::Selected => "selected",
+                    ShowRows::Unselected => "unselected",
+                    ShowRows::Paginated => unreachable!(),
+                };
+                params.push((format!("{dr}.showRows"), value.into()));
+            }
+        }
+
         if let Some(filters) = &options.filter_array {
-            params.extend(encode_filters(filters, dr));
+            params.extend(encode_filters(filters, &dr));
         }
         if let Some(parameters) = &options.parameters {
             for (k, v) in parameters {
@@ -1790,7 +1869,10 @@ impl LabkeyClient {
             }
         }
 
-        self.get(url, &params).await
+        match method {
+            RequestMethod::Get => self.get(url, &params).await,
+            RequestMethod::Post => self.post_form(url, &params).await,
+        }
     }
 
     /// Select distinct values for a query column.
@@ -4301,5 +4383,26 @@ mod tests {
         assert_eq!(obj.get("shared"), Some(&serde_json::json!(true)));
         assert_eq!(obj.get("hidden"), Some(&serde_json::json!(true)));
         assert!(!obj.contains_key("session"));
+    }
+
+    #[test]
+    fn request_method_defaults_to_get() {
+        assert_eq!(RequestMethod::default(), RequestMethod::Get);
+    }
+
+    #[test]
+    fn show_rows_variants_are_distinct() {
+        let variants = [
+            ShowRows::All,
+            ShowRows::None,
+            ShowRows::Paginated,
+            ShowRows::Selected,
+            ShowRows::Unselected,
+        ];
+        for (i, a) in variants.iter().enumerate() {
+            for (j, b) in variants.iter().enumerate() {
+                assert_eq!(i == j, a == b, "{a:?} vs {b:?}");
+            }
+        }
     }
 }
