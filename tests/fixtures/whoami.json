@@ -3,5 +3,6 @@
   "email": "analyst@example.com",
   "impersonated": false,
   "userId": 101,
-  "displayName": "Analyst User"
+  "displayName": "Analyst User",
+  "CSRF": "abc123token"
 }

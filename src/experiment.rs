@@ -991,7 +991,7 @@ fn validate_assay_identity(
     assay_name: Option<&str>,
     endpoint: &str,
 ) -> Result<(), LabkeyError> {
-    if assay_id.is_none() && assay_name.is_none_or(str::is_empty) {
+    if assay_id.is_none() && assay_name.is_none_or(|s| s.trim().is_empty()) {
         return Err(LabkeyError::InvalidInput(format!(
             "{endpoint} requires one of `assay_id` or `assay_name`"
         )));
@@ -2268,5 +2268,15 @@ mod tests {
         )
         .expect_err("blank sample-set name should fail");
         assert!(matches!(save_materials, LabkeyError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn validate_assay_identity_rejects_whitespace_only_name() {
+        let result = validate_assay_identity(None, Some("   "), "test_endpoint");
+        assert!(
+            result.is_err(),
+            "whitespace-only assay name should be rejected"
+        );
+        assert!(matches!(result, Err(LabkeyError::InvalidInput(_))));
     }
 }

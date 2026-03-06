@@ -401,10 +401,14 @@ fn build_start_analysis_params(
     if let Some(xml_parameters) = &options.xml_parameters {
         params.push(("configureXml".to_string(), xml_parameters.clone()));
     } else if let Some(json_parameters) = &options.json_parameters {
-        params.push((
-            "configureJson".to_string(),
-            serde_json::to_string(json_parameters)?,
-        ));
+        // JS Pipeline.ts:271 passes strings through as-is and only encodes
+        // non-string values. Mirror that to avoid double-encoding when the
+        // caller provides a pre-serialized JSON string.
+        let encoded = match json_parameters {
+            serde_json::Value::String(s) => s.clone(),
+            other => serde_json::to_string(other)?,
+        };
+        params.push(("configureJson".to_string(), encoded));
     }
 
     Ok(params)
@@ -572,6 +576,23 @@ mod tests {
 
         assert!(params.contains(&("configureXml".to_string(), "<bioml />".to_string())));
         assert!(!params.iter().any(|(key, _)| key == "configureJson"));
+    }
+
+    #[test]
+    fn start_analysis_params_pass_string_json_parameters_through_without_double_encoding() {
+        let pre_serialized = r#"{"alpha":1,"beta":true}"#;
+        let options = StartAnalysisOptions::builder()
+            .file_ids(vec![1])
+            .files(vec!["input1.tsv".to_string()])
+            .path("pipeline/path".to_string())
+            .protocol_name("RNAseq".to_string())
+            .task_id("task-1".to_string())
+            .json_parameters(serde_json::Value::String(pre_serialized.to_string()))
+            .build();
+
+        let params = build_start_analysis_params(&options).expect("params should build");
+
+        assert!(params.contains(&("configureJson".to_string(), pre_serialized.to_string())));
     }
 
     #[test]

@@ -40,9 +40,16 @@ pub struct WhoAmIResponse {
     /// Whether the current session is impersonating another user.
     #[serde(default)]
     pub impersonated: Option<bool>,
-    /// Current user id when available.
-    #[serde(default)]
+    /// Current user id when available. Accepts both `userId` (JS convention)
+    /// and `id` (Java convention) from the server response.
+    #[serde(default, alias = "id")]
     pub user_id: Option<i64>,
+    /// Display name of the current user when available.
+    #[serde(default)]
+    pub display_name: Option<String>,
+    /// CSRF token for the current session.
+    #[serde(default, rename = "CSRF")]
+    pub csrf: Option<String>,
     /// Additional endpoint-specific response fields.
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
@@ -419,10 +426,8 @@ mod tests {
         assert_eq!(response.email.as_deref(), Some("analyst@example.com"));
         assert_eq!(response.authenticated, Some(true));
         assert_eq!(response.impersonated, Some(false));
-        assert_eq!(
-            response.extra.get("displayName"),
-            Some(&serde_json::json!("Analyst User"))
-        );
+        assert_eq!(response.display_name.as_deref(), Some("Analyst User"));
+        assert_eq!(response.csrf.as_deref(), Some("abc123token"));
     }
 
     #[test]
@@ -434,7 +439,25 @@ mod tests {
         assert!(response.email.is_none());
         assert!(response.authenticated.is_none());
         assert!(response.impersonated.is_none());
+        assert!(response.display_name.is_none());
+        assert!(response.csrf.is_none());
         assert!(response.extra.is_empty());
+    }
+
+    #[test]
+    fn who_am_i_response_accepts_java_style_id_field() {
+        let response: WhoAmIResponse = serde_json::from_value(serde_json::json!({
+            "id": 42,
+            "email": "admin@example.com",
+            "displayName": "Admin",
+            "CSRF": "token123",
+            "impersonated": false
+        }))
+        .expect("Java-style id field should parse");
+
+        assert_eq!(response.user_id, Some(42));
+        assert_eq!(response.display_name.as_deref(), Some("Admin"));
+        assert_eq!(response.csrf.as_deref(), Some("token123"));
     }
 
     #[test]

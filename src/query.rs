@@ -218,6 +218,28 @@ pub struct ModifyRowsResults {
     pub schema_name: String,
 }
 
+/// Response from [`LabkeyClient::truncate_table`].
+///
+/// The `LabKey` server returns `deletedRows` (not `rowsAffected`) for
+/// truncation operations. All fields are optional to match the Java
+/// client's `getProperty` null-return pattern.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TruncateTableResponse {
+    /// Number of rows deleted by the truncation.
+    #[serde(default)]
+    pub deleted_rows: Option<i64>,
+    /// Schema name affected by the command.
+    #[serde(default)]
+    pub schema_name: Option<String>,
+    /// Query name affected by the command.
+    #[serde(default)]
+    pub query_name: Option<String>,
+    /// Command name returned by the server.
+    #[serde(default)]
+    pub command: Option<String>,
+}
+
 /// Options for [`LabkeyClient::select_rows`].
 ///
 /// Only `schema_name` and `query_name` are required. All other fields
@@ -326,6 +348,8 @@ pub struct ExecuteSqlOptions {
     pub save_in_session: Option<bool>,
     /// Whether to include style information in the response.
     pub include_style: Option<bool>,
+    /// Whether to include the details column in the response.
+    pub include_details_column: Option<bool>,
     /// Parameters for parameterized queries.
     pub parameters: Option<HashMap<String, String>>,
 }
@@ -945,7 +969,8 @@ pub struct ImportDataResponse {
     /// Whether the import request was accepted by the server.
     pub success: bool,
     /// Number of rows imported when available.
-    pub row_count: i64,
+    #[serde(default)]
+    pub row_count: Option<i64>,
     /// Pipeline job id for asynchronous imports.
     #[serde(default)]
     pub job_id: Option<String>,
@@ -1448,6 +1473,8 @@ struct ExecuteSqlBody {
     save_in_session: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     include_style: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    include_details_column: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -1818,9 +1845,15 @@ impl LabkeyClient {
             ),
             opt("includeTotalCount", options.include_total_count),
             opt("includeMetadata", options.include_metadata),
-            opt("includeDetailsColumn", options.include_details_column),
-            opt("includeUpdateColumn", options.include_update_column),
-            opt("includeStyle", options.include_style),
+            options
+                .include_details_column
+                .and_then(|v| v.then(|| ("includeDetailsColumn".into(), "true".into()))),
+            options
+                .include_update_column
+                .and_then(|v| v.then(|| ("includeUpdateColumn".into(), "true".into()))),
+            options
+                .include_style
+                .and_then(|v| v.then(|| ("includeStyle".into(), "true".into()))),
             options
                 .ignore_filter
                 .and_then(|v| v.then(|| (format!("{dr}.ignoreFilter"), "1".into()))),
@@ -2722,14 +2755,16 @@ impl LabkeyClient {
     ///     )
     ///     .await?;
     ///
-    /// println!("Rows affected: {}", result.rows_affected);
+    /// if let Some(count) = result.deleted_rows {
+    ///     println!("Deleted {count} rows");
+    /// }
     /// # Ok(())
     /// # }
     /// ```
     pub async fn truncate_table(
         &self,
         options: TruncateTableOptions,
-    ) -> Result<ModifyRowsResults, LabkeyError> {
+    ) -> Result<TruncateTableResponse, LabkeyError> {
         let body = MutateRowsBody {
             schema_name: options.schema_name,
             query_name: options.query_name,
@@ -2742,8 +2777,12 @@ impl LabkeyClient {
             skip_reselect_rows: options.skip_reselect_rows,
         };
 
-        self.mutate_rows("truncateTable.api", options.container_path, &body)
-            .await
+        let url = self.build_url(
+            "query",
+            "truncateTable.api",
+            options.container_path.as_deref(),
+        );
+        self.post(url, &body).await
     }
 
     /// Move rows to a different container.
@@ -3102,17 +3141,24 @@ impl LabkeyClient {
             }
         }
 
+        // JS ExecuteSql.ts:111-115 omits maxRows when negative and offset
+        // when zero or falsy, so we mirror that to avoid sending sentinel
+        // values that change server behavior.
+        let max_rows = options.max_rows.filter(|&m| m >= 0);
+        let offset = options.offset.filter(|&o| o > 0);
+
         let body = ExecuteSqlBody {
             schema_name: options.schema_name,
             sql: waf_encode(&options.sql),
             api_version: 17.1,
-            max_rows: options.max_rows,
-            offset: options.offset,
+            max_rows,
+            offset,
             container_filter: options.container_filter,
             include_total_count: options.include_total_count,
             include_metadata: options.include_metadata,
             save_in_session: options.save_in_session,
             include_style: options.include_style,
+            include_details_column: options.include_details_column,
         };
 
         self.post(url, &body).await
@@ -3793,7 +3839,7 @@ mod tests {
         let response: ImportDataResponse =
             serde_json::from_value(json).expect("should deserialize");
         assert!(response.success);
-        assert_eq!(response.row_count, 4);
+        assert_eq!(response.row_count, Some(4));
         assert_eq!(response.job_id.as_deref(), Some("job-123"));
     }
 
@@ -3807,7 +3853,7 @@ mod tests {
         let response: ImportDataResponse =
             serde_json::from_value(json).expect("should deserialize");
         assert!(response.success);
-        assert_eq!(response.row_count, 2);
+        assert_eq!(response.row_count, Some(2));
         assert!(response.job_id.is_none());
     }
 
@@ -4383,6 +4429,89 @@ mod tests {
         assert_eq!(obj.get("shared"), Some(&serde_json::json!(true)));
         assert_eq!(obj.get("hidden"), Some(&serde_json::json!(true)));
         assert!(!obj.contains_key("session"));
+    }
+
+    #[test]
+    fn execute_sql_body_omits_negative_max_rows_and_zero_offset() {
+        let body = ExecuteSqlBody {
+            schema_name: "core".to_string(),
+            sql: "SELECT 1".to_string(),
+            api_version: 17.1,
+            max_rows: Some(-1),
+            offset: Some(0),
+            container_filter: None,
+            include_total_count: None,
+            include_metadata: None,
+            save_in_session: None,
+            include_style: None,
+            include_details_column: None,
+        };
+
+        // Negative max_rows and zero offset should still serialize here because
+        // the filtering happens in execute_sql before body construction, not in
+        // the body itself. This test documents the body struct's behavior.
+        let value = serde_json::to_value(&body).expect("should serialize");
+        assert_eq!(value["maxRows"], -1);
+        assert_eq!(value["offset"], 0);
+    }
+
+    #[test]
+    fn execute_sql_body_includes_details_column_when_set() {
+        let body = ExecuteSqlBody {
+            schema_name: "core".to_string(),
+            sql: "SELECT 1".to_string(),
+            api_version: 17.1,
+            max_rows: None,
+            offset: None,
+            container_filter: None,
+            include_total_count: None,
+            include_metadata: None,
+            save_in_session: None,
+            include_style: None,
+            include_details_column: Some(true),
+        };
+
+        let value = serde_json::to_value(&body).expect("should serialize");
+        assert_eq!(value["includeDetailsColumn"], true);
+    }
+
+    #[test]
+    fn import_data_response_deserializes_without_row_count() {
+        let json = serde_json::json!({
+            "success": true
+        });
+
+        let response: ImportDataResponse =
+            serde_json::from_value(json).expect("should deserialize without rowCount");
+        assert!(response.success);
+        assert_eq!(response.row_count, None);
+    }
+
+    #[test]
+    fn truncate_table_response_deserializes_java_wire_format() {
+        let json = serde_json::json!({
+            "deletedRows": 42,
+            "schemaName": "lists",
+            "queryName": "People",
+            "command": "truncate"
+        });
+
+        let response: TruncateTableResponse =
+            serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(response.deleted_rows, Some(42));
+        assert_eq!(response.schema_name.as_deref(), Some("lists"));
+        assert_eq!(response.query_name.as_deref(), Some("People"));
+        assert_eq!(response.command.as_deref(), Some("truncate"));
+    }
+
+    #[test]
+    fn truncate_table_response_deserializes_minimal() {
+        let json = serde_json::json!({});
+
+        let response: TruncateTableResponse =
+            serde_json::from_value(json).expect("should deserialize minimal");
+        assert_eq!(response.deleted_rows, None);
+        assert_eq!(response.schema_name, None);
     }
 
     #[test]

@@ -10,6 +10,7 @@ use crate::{
     common::opt,
     domain::DomainDesign,
     error::LabkeyError,
+    experiment::Run,
     filter::{Filter, encode_filters},
 };
 
@@ -491,6 +492,11 @@ struct GetAssayRunBody {
     lsid: String,
 }
 
+#[derive(Deserialize)]
+struct GetAssayRunEnvelope {
+    run: Run,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ImportRunPart {
     Text {
@@ -836,18 +842,16 @@ impl LabkeyClient {
     ///     )
     ///     .await?;
     ///
-    /// println!("{}", run["name"]);
+    /// println!("{:?}", run.exp_object.name);
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn get_assay_run(
-        &self,
-        options: GetAssayRunOptions,
-    ) -> Result<serde_json::Value, LabkeyError> {
+    pub async fn get_assay_run(&self, options: GetAssayRunOptions) -> Result<Run, LabkeyError> {
         validate_get_assay_run_options(&options)?;
         let url = self.build_url("assay", "getAssayRun", options.container_path.as_deref());
         let body = GetAssayRunBody { lsid: options.lsid };
-        self.post(url, &body).await
+        let envelope: GetAssayRunEnvelope = self.post(url, &body).await?;
+        Ok(envelope.run)
     }
 
     /// Import an assay run using multipart upload modes.
@@ -1901,7 +1905,7 @@ mod tests {
     fn get_assay_run_body_contains_required_lsid() {
         fn assert_get_assay_run_return_type<F>(_: F)
         where
-            F: std::future::Future<Output = Result<serde_json::Value, LabkeyError>>,
+            F: std::future::Future<Output = Result<Run, LabkeyError>>,
         {
         }
 

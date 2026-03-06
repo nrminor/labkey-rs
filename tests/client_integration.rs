@@ -7,7 +7,7 @@ use common::{
     ClientConfig, Credential, LabkeyClient, LabkeyError, Mock, MockServer, ResponseTemplate,
     fixture, test_client,
 };
-use labkey_rs::assay::{ImportRunOptions, ImportRunSource};
+use labkey_rs::assay::{GetAssayRunOptions, ImportRunOptions, ImportRunSource};
 #[cfg(feature = "internal-test-support")]
 use labkey_rs::client::__internal_test_support;
 use labkey_rs::common::AuditBehavior;
@@ -2037,7 +2037,7 @@ async fn import_data_sends_text_source_and_optional_fields() {
         .expect("import data should succeed");
 
     assert!(response.success);
-    assert_eq!(response.row_count, 1);
+    assert_eq!(response.row_count, Some(1));
     assert!(response.job_id.is_none());
 }
 
@@ -2082,7 +2082,7 @@ async fn import_data_sends_file_source() {
         .expect("file import should succeed");
 
     assert!(response.success);
-    assert_eq!(response.row_count, 1);
+    assert_eq!(response.row_count, Some(1));
     assert_eq!(response.job_id.as_deref(), Some("job-42"));
 }
 
@@ -2121,7 +2121,7 @@ async fn import_data_sends_path_source() {
         .expect("path import should succeed");
 
     assert!(response.success);
-    assert_eq!(response.row_count, 5);
+    assert_eq!(response.row_count, Some(5));
 }
 
 #[tokio::test]
@@ -2164,7 +2164,7 @@ async fn import_data_sends_module_resource_source() {
         .expect("module resource import should succeed");
 
     assert!(response.success);
-    assert_eq!(response.row_count, 3);
+    assert_eq!(response.row_count, Some(3));
 }
 
 #[tokio::test]
@@ -2199,7 +2199,7 @@ async fn import_data_sends_merge_insert_option_wire_value() {
         .expect("merge import should succeed");
 
     assert!(response.success);
-    assert_eq!(response.row_count, 2);
+    assert_eq!(response.row_count, Some(2));
 }
 
 #[tokio::test]
@@ -2405,10 +2405,8 @@ async fn truncate_table_sends_required_fields_without_rows() {
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "command": "truncate",
-            "errors": [],
+            "deletedRows": 9,
             "queryName": "People",
-            "rows": [],
-            "rowsAffected": 0,
             "schemaName": "lists"
         })))
         .mount(&server)
@@ -2428,8 +2426,10 @@ async fn truncate_table_sends_required_fields_without_rows() {
         .await
         .expect("truncate table should succeed");
 
-    assert_eq!(result.command, "truncate");
-    assert_eq!(result.rows_affected, 0);
+    assert_eq!(result.command.as_deref(), Some("truncate"));
+    assert_eq!(result.deleted_rows, Some(9));
+    assert_eq!(result.schema_name.as_deref(), Some("lists"));
+    assert_eq!(result.query_name.as_deref(), Some("People"));
 }
 
 #[tokio::test]
@@ -2990,6 +2990,8 @@ async fn who_am_i_gets_login_whoami_api_and_deserializes_fixture_response() {
 
     assert_eq!(response.user_id, Some(101));
     assert_eq!(response.email.as_deref(), Some("analyst@example.com"));
+    assert_eq!(response.display_name.as_deref(), Some("Analyst User"));
+    assert_eq!(response.csrf.as_deref(), Some("abc123token"));
 }
 
 #[tokio::test]
@@ -5418,4 +5420,238 @@ async fn select_rows_default_method_is_get() {
         )
         .await
         .expect("default GET request should succeed");
+}
+
+#[tokio::test]
+async fn execute_sql_omits_negative_max_rows_and_zero_offset() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/query-executeSql.api"))
+        .and(body_string_contains("\"schemaName\":\"core\""))
+        .and(body_string_contains("\"apiVersion\":17.1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "core",
+            "rowCount": 0,
+            "rows": []
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .execute_sql(
+            ExecuteSqlOptions::builder()
+                .schema_name("core".to_string())
+                .sql("SELECT 1".to_string())
+                .max_rows(-1)
+                .offset(0_i64)
+                .build(),
+        )
+        .await
+        .expect("execute_sql should succeed");
+
+    assert_eq!(response.row_count, 0);
+
+    // Verify the body did NOT contain maxRows or offset by checking the
+    // recorded request. We use a second mock that rejects those fields.
+    let server2 = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/query-executeSql.api"))
+        .and(body_string_contains("\"maxRows\""))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server2)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/query-executeSql.api"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "core",
+            "rowCount": 0,
+            "rows": []
+        })))
+        .mount(&server2)
+        .await;
+
+    let client2 = test_client(&server2.uri());
+    client2
+        .execute_sql(
+            ExecuteSqlOptions::builder()
+                .schema_name("core".to_string())
+                .sql("SELECT 1".to_string())
+                .max_rows(-1)
+                .offset(0_i64)
+                .build(),
+        )
+        .await
+        .expect("negative maxRows should be omitted from body");
+}
+
+#[tokio::test]
+async fn execute_sql_includes_details_column_when_set() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/query-executeSql.api"))
+        .and(body_string_contains("\"includeDetailsColumn\":true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "core",
+            "rowCount": 0,
+            "rows": []
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    client
+        .execute_sql(
+            ExecuteSqlOptions::builder()
+                .schema_name("core".to_string())
+                .sql("SELECT 1".to_string())
+                .include_details_column(true)
+                .build(),
+        )
+        .await
+        .expect("execute_sql with includeDetailsColumn should succeed");
+}
+
+#[tokio::test]
+async fn who_am_i_deserializes_java_style_id_field() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/Alt/Container/login-whoami.api"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 42,
+            "email": "admin@example.com",
+            "displayName": "Admin User",
+            "CSRF": "xsrf-token-99",
+            "impersonated": false
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .who_am_i(
+            WhoAmIOptions::builder()
+                .container_path("/Alt/Container".to_string())
+                .build(),
+        )
+        .await
+        .expect("who_am_i with Java-style id should succeed");
+
+    assert_eq!(response.user_id, Some(42));
+    assert_eq!(response.display_name.as_deref(), Some("Admin User"));
+    assert_eq!(response.csrf.as_deref(), Some("xsrf-token-99"));
+}
+
+#[tokio::test]
+async fn get_assay_run_extracts_run_from_envelope() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/assay-getAssayRun"))
+        .and(body_json(serde_json::json!({
+            "lsid": "urn:lsid:labkey.com:AssayRun.Folder-1:7"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "run": {
+                "name": "Run-7",
+                "id": 7,
+                "lsid": "urn:lsid:labkey.com:AssayRun.Folder-1:7",
+                "dataInputs": [],
+                "dataOutputs": [],
+                "materialInputs": [],
+                "materialOutputs": []
+            }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let run = client
+        .get_assay_run(
+            GetAssayRunOptions::builder()
+                .lsid("urn:lsid:labkey.com:AssayRun.Folder-1:7".to_string())
+                .build(),
+        )
+        .await
+        .expect("get_assay_run should extract run from envelope");
+
+    assert_eq!(run.exp_object.name, Some("Run-7".to_string()));
+    assert_eq!(run.exp_object.id, Some(7));
+}
+
+#[tokio::test]
+async fn select_rows_omits_false_boolean_flags() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/MyProject/MyFolder/query-getQuery.api"))
+        .and(query_param("schemaName", "lists"))
+        .and(query_param_is_missing("includeDetailsColumn"))
+        .and(query_param_is_missing("includeUpdateColumn"))
+        .and(query_param_is_missing("includeStyle"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "schemaName": "lists",
+            "rowCount": 0,
+            "rows": []
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    client
+        .select_rows(
+            SelectRowsOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .include_details_column(false)
+                .include_update_column(false)
+                .include_style(false)
+                .build(),
+        )
+        .await
+        .expect("false boolean flags should be omitted from request");
+}
+
+#[tokio::test]
+async fn import_data_succeeds_without_row_count_in_response() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/query-import.api"))
+        .and(header_exists("content-type"))
+        .and(body_string_contains("name=\"schemaName\""))
+        .and(body_string_contains("lists"))
+        .and(body_string_contains("name=\"queryName\""))
+        .and(body_string_contains("People"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .import_data(
+            ImportDataOptions::builder()
+                .schema_name("lists".to_string())
+                .query_name("People".to_string())
+                .source(ImportDataSource::Text("Name\nAlice".to_string()))
+                .build(),
+        )
+        .await
+        .expect("import_data should succeed without rowCount");
+
+    assert!(response.success);
+    assert_eq!(response.row_count, None);
 }
