@@ -12,7 +12,7 @@ use labkey_rs::assay::{ImportRunOptions, ImportRunSource};
 use labkey_rs::client::__internal_test_support;
 use labkey_rs::common::AuditBehavior;
 use labkey_rs::di::{
-    ResetTransformStateOptions, RunTransformOptions, TransformConfig, TransformSelector,
+    ResetTransformStateOptions, RunTransformOptions, TransformSelector,
     UpdateTransformConfigurationOptions,
 };
 use labkey_rs::experiment::{LineageOptions, ResolveOptions};
@@ -138,11 +138,13 @@ async fn run_transform_posts_expected_no_suffix_route_and_body_shape() {
         .and(header("x-requested-with", "XMLHttpRequest"))
         .and(basic_auth("apikey", "test-api-key"))
         .and(body_json(serde_json::json!({
-            "transformName": "LoadFromStaging"
+            "transformId": "LoadFromStaging"
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "success": true,
-            "jobId": 9
+            "jobId": "9",
+            "pipelineURL": "/labkey/pipeline-status/showList.view",
+            "status": "success"
         })))
         .mount(&server)
         .await;
@@ -158,7 +160,12 @@ async fn run_transform_posts_expected_no_suffix_route_and_body_shape() {
         .expect("run_transform should succeed");
 
     assert_eq!(response.success, Some(true));
-    assert_eq!(response.job_id, Some(9));
+    assert_eq!(response.job_id.as_deref(), Some("9"));
+    assert_eq!(
+        response.pipeline_url.as_deref(),
+        Some("/labkey/pipeline-status/showList.view")
+    );
+    assert_eq!(response.status.as_deref(), Some("success"));
 }
 
 #[tokio::test]
@@ -172,11 +179,10 @@ async fn reset_transform_state_posts_expected_no_suffix_route_and_body_shape() {
         .and(header("x-requested-with", "XMLHttpRequest"))
         .and(basic_auth("apikey", "test-api-key"))
         .and(body_json(serde_json::json!({
-            "transformId": 42
+            "transformId": "42"
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "success": true,
-            "message": "reset"
+            "success": true
         })))
         .mount(&server)
         .await;
@@ -192,7 +198,6 @@ async fn reset_transform_state_posts_expected_no_suffix_route_and_body_shape() {
         .expect("reset_transform_state should succeed");
 
     assert_eq!(response.success, Some(true));
-    assert_eq!(response.message.as_deref(), Some("reset"));
 }
 
 #[tokio::test]
@@ -206,47 +211,80 @@ async fn update_transform_configuration_posts_capital_u_route_and_body_shape() {
         .and(header("x-requested-with", "XMLHttpRequest"))
         .and(basic_auth("apikey", "test-api-key"))
         .and(body_json(serde_json::json!({
-            "transformName": "LoadFromStaging",
-            "transformConfig": {
-                "description": "updated",
-                "enabled": true,
-                "properties": {"batchSize": 50}
-            }
+            "transformId": "LoadFromStaging",
+            "enabled": true,
+            "verboseLogging": false
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "success": true,
-            "transformConfig": {
-                "description": "updated",
-                "enabled": true
+            "result": {
+                "enabled": true,
+                "verboseLogging": false,
+                "state": {"rowCount": 100},
+                "lastChecked": "2024-01-15T10:30:00Z",
+                "descriptionId": "LoadFromStaging"
             }
         })))
         .mount(&server)
         .await;
 
     let client = test_client(&server.uri());
-    let mut config = TransformConfig::new();
-    config.description = Some("updated".to_string());
-    config.enabled = Some(true);
-    config.properties = Some(serde_json::json!({"batchSize": 50}));
-
     let response = client
         .update_transform_configuration(
             UpdateTransformConfigurationOptions::builder()
                 .selector(TransformSelector::Name("LoadFromStaging".to_string()))
-                .transform_config(config)
+                .enabled(true)
+                .verbose_logging(false)
                 .build(),
         )
         .await
         .expect("update_transform_configuration should succeed");
 
     assert_eq!(response.success, Some(true));
-    assert_eq!(
-        response
-            .transform_config
-            .as_ref()
-            .and_then(|value| value.enabled),
-        Some(true)
-    );
+    let result = response.result.expect("result envelope should be present");
+    assert_eq!(result.enabled, Some(true));
+    assert_eq!(result.verbose_logging, Some(false));
+    assert_eq!(result.description_id.as_deref(), Some("LoadFromStaging"));
+}
+
+#[tokio::test]
+async fn update_transform_configuration_read_only_mode_sends_only_transform_id() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/MyProject/MyFolder/dataintegration-UpdateTransformConfiguration",
+        ))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "transformId": "42"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true,
+            "result": {
+                "enabled": false,
+                "verboseLogging": true,
+                "descriptionId": "MyETL"
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .update_transform_configuration(
+            UpdateTransformConfigurationOptions::builder()
+                .selector(TransformSelector::Id(42))
+                .build(),
+        )
+        .await
+        .expect("read-only query should succeed");
+
+    assert_eq!(response.success, Some(true));
+    let result = response.result.expect("result should be present");
+    assert_eq!(result.enabled, Some(false));
+    assert_eq!(result.verbose_logging, Some(true));
 }
 
 #[tokio::test]
@@ -3719,11 +3757,16 @@ async fn get_securable_resources_extracts_envelope_and_params() {
         .and(basic_auth("apikey", "test-api-key"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "resources": {
-                "resourceId": "root",
+                "id": "root",
                 "name": "Root",
+                "description": "Root container",
+                "resourceClass": "org.labkey.core.project.ProjectImpl",
                 "children": [{
-                    "resourceId": "child",
+                    "id": "child",
                     "name": "Child",
+                    "description": "Child folder",
+                    "resourceClass": "org.labkey.study.model.StudyImpl",
+                    "effectivePermissions": ["org.labkey.api.security.permissions.ReadPermission"],
                     "children": []
                 }]
             }
@@ -3744,8 +3787,14 @@ async fn get_securable_resources_extracts_envelope_and_params() {
         .await
         .expect("get securable resources should succeed");
 
-    assert_eq!(resources.resource_id, "root");
+    assert_eq!(resources.id, "root");
+    assert_eq!(
+        resources.resource_class.as_deref(),
+        Some("org.labkey.core.project.ProjectImpl")
+    );
     assert_eq!(resources.children.len(), 1);
+    assert_eq!(resources.children[0].id, "child");
+    assert_eq!(resources.children[0].effective_permissions.len(), 1);
 }
 
 #[tokio::test]

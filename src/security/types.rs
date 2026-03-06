@@ -194,16 +194,33 @@ pub struct RolePermission {
 }
 
 /// Securable resource metadata.
+///
+/// Field names match the JS client's `SecurableResource` interface
+/// (`security/types.ts`), where the identifier is `id` (not `resourceId`).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct SecurableResource {
-    /// Resource id.
-    pub resource_id: String,
-    /// Resource name.
+    /// Unique resource identifier (typically a GUID).
+    pub id: String,
+    /// Resource display name.
     #[serde(default)]
     pub name: Option<String>,
-    /// Effective permission unique names for the current user.
+    /// Resource description.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Fully-qualified Java class name of the resource
+    /// (e.g. `"org.labkey.study.model.StudyImpl"`).
+    #[serde(default)]
+    pub resource_class: Option<String>,
+    /// Parent resource identifier.
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    /// Parent container path.
+    #[serde(default)]
+    pub parent_container_path: Option<String>,
+    /// Effective permission unique names for the current user (present when
+    /// `includeEffectivePermissions` was requested).
     #[serde(default)]
     pub effective_permissions: Vec<String>,
     /// Child resources.
@@ -328,10 +345,52 @@ mod tests {
 
     #[test]
     fn securable_resource_deserializes_minimal_fixture() {
-        let value = serde_json::json!({"resourceId": "res-1", "children": []});
+        let value = serde_json::json!({"id": "res-1", "children": []});
         let resource: SecurableResource = serde_json::from_value(value).expect("valid resource");
-        assert_eq!(resource.resource_id, "res-1");
+        assert_eq!(resource.id, "res-1");
         assert!(resource.children.is_empty());
+        assert!(resource.name.is_none());
+        assert!(resource.description.is_none());
+        assert!(resource.resource_class.is_none());
+        assert!(resource.parent_id.is_none());
+        assert!(resource.parent_container_path.is_none());
+        assert!(resource.effective_permissions.is_empty());
+    }
+
+    #[test]
+    fn securable_resource_deserializes_all_js_fields() {
+        let value = serde_json::json!({
+            "id": "abc-123",
+            "name": "My Study",
+            "description": "A study resource",
+            "resourceClass": "org.labkey.study.model.StudyImpl",
+            "parentId": "parent-456",
+            "parentContainerPath": "/Home/Project",
+            "effectivePermissions": ["org.labkey.api.security.permissions.ReadPermission"],
+            "children": [{
+                "id": "child-789",
+                "name": "Child",
+                "description": "Child resource",
+                "resourceClass": "org.labkey.api.data.DatasetDefinition",
+                "children": []
+            }]
+        });
+        let resource: SecurableResource = serde_json::from_value(value).expect("valid resource");
+        assert_eq!(resource.id, "abc-123");
+        assert_eq!(resource.name.as_deref(), Some("My Study"));
+        assert_eq!(resource.description.as_deref(), Some("A study resource"));
+        assert_eq!(
+            resource.resource_class.as_deref(),
+            Some("org.labkey.study.model.StudyImpl")
+        );
+        assert_eq!(resource.parent_id.as_deref(), Some("parent-456"));
+        assert_eq!(
+            resource.parent_container_path.as_deref(),
+            Some("/Home/Project")
+        );
+        assert_eq!(resource.effective_permissions.len(), 1);
+        assert_eq!(resource.children.len(), 1);
+        assert_eq!(resource.children[0].id, "child-789");
     }
 
     #[test]

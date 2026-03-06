@@ -66,10 +66,12 @@ fn create_list_options_json(key_name: String) -> serde_json::Value {
 }
 
 fn map_create_list_to_create_domain_options(options: CreateListOptions) -> CreateDomainOptions {
-    let mut domain_design = options
+    // Match JS client precedence (List.ts:99-102): if a domainDesign is
+    // provided, use it as-is; only fall back to options.name when no
+    // domainDesign was given.
+    let domain_design = options
         .domain_design
-        .unwrap_or_else(|| default_domain_design(options.name.clone()));
-    domain_design.name = Some(options.name);
+        .unwrap_or_else(|| default_domain_design(options.name));
 
     CreateDomainOptions::builder()
         .maybe_container_path(options.container_path)
@@ -98,8 +100,10 @@ impl LabkeyClient {
     /// Create a list by delegating to [`LabkeyClient::create_domain`].
     ///
     /// This convenience method maps [`ListKeyType`] to the corresponding
-    /// [`crate::domain::DomainKind`], sets the delegated domain-design name,
-    /// and passes `options.keyName` through domain-creation options.
+    /// [`crate::domain::DomainKind`] and passes `options.keyName` through
+    /// domain-creation options. If a `domain_design` is provided, it is used
+    /// as-is (including its name); otherwise a default design is created
+    /// using `options.name`.
     ///
     /// # Errors
     ///
@@ -180,16 +184,19 @@ mod tests {
     }
 
     #[test]
-    fn create_list_delegation_maps_var_list_and_overrides_domain_name() {
+    fn create_list_gives_domain_design_name_precedence_over_options_name() {
+        // Matches JS client List.spec.ts "should give domainDesign precedence":
+        // when a domainDesign with its own name is provided, that name wins
+        // and options.name is ignored.
         let mapped = map_create_list_to_create_domain_options(
             CreateListOptions::builder()
-                .name("OverrideName".to_string())
+                .name("OptionsName".to_string())
                 .key_name("Name".to_string())
                 .key_type(ListKeyType::VarList)
                 .domain_design(DomainDesign {
                     domain_id: Some(1),
                     domain_uri: None,
-                    name: Some("OriginalName".to_string()),
+                    name: Some("DomainDesignName".to_string()),
                     description: None,
                     schema_name: None,
                     query_name: None,
@@ -203,7 +210,65 @@ mod tests {
         assert_eq!(mapped.kind, Some(DomainKind::VarList));
         assert_eq!(
             mapped.domain_design.and_then(|value| value.name),
-            Some("OverrideName".to_string())
+            Some("DomainDesignName".to_string())
+        );
+    }
+
+    #[test]
+    fn create_list_falls_back_to_options_name_when_no_domain_design_provided() {
+        let mapped = map_create_list_to_create_domain_options(
+            CreateListOptions::builder()
+                .name("FallbackName".to_string())
+                .key_name("RowId".to_string())
+                .key_type(ListKeyType::IntList)
+                .build(),
+        );
+
+        assert_eq!(
+            mapped.domain_design.and_then(|value| value.name),
+            Some("FallbackName".to_string())
+        );
+    }
+
+    #[test]
+    fn create_list_preserves_domain_design_with_none_name() {
+        // When a domain_design is provided but its name is None, the
+        // options.name is NOT injected — the design is used as-is.
+        let mapped = map_create_list_to_create_domain_options(
+            CreateListOptions::builder()
+                .name("OptionsName".to_string())
+                .key_name("RowId".to_string())
+                .key_type(ListKeyType::IntList)
+                .domain_design(DomainDesign {
+                    domain_id: None,
+                    domain_uri: None,
+                    name: None,
+                    description: Some("custom design".to_string()),
+                    schema_name: None,
+                    query_name: None,
+                    fields: None,
+                    indices: None,
+                    extra: HashMap::new(),
+                })
+                .build(),
+        );
+
+        // The domain design's None name is preserved, not overwritten.
+        assert!(
+            mapped
+                .domain_design
+                .as_ref()
+                .and_then(|value| value.name.as_ref())
+                .is_none()
+        );
+        // But the description from the provided design survives.
+        assert_eq!(
+            mapped
+                .domain_design
+                .as_ref()
+                .and_then(|value| value.description.as_ref())
+                .map(String::as_str),
+            Some("custom design")
         );
     }
 

@@ -457,7 +457,7 @@ impl LabkeyClient {
     ///     )
     ///     .await?;
     ///
-    /// println!("Root resource id: {}", resources.resource_id);
+    /// println!("Root resource id: {}", resources.id);
     /// # Ok(())
     /// # }
     /// ```
@@ -572,12 +572,14 @@ mod tests {
     #[test]
     fn securable_resource_deserializes_recursive_children() {
         let value = serde_json::json!({
-            "resourceId": "root",
+            "id": "root",
             "name": "Root",
+            "resourceClass": "org.labkey.core.project.ProjectImpl",
             "children": [
                 {
-                    "resourceId": "child",
+                    "id": "child",
                     "name": "Child",
+                    "resourceClass": "org.labkey.study.model.StudyImpl",
                     "children": []
                 }
             ]
@@ -585,9 +587,9 @@ mod tests {
 
         let resource: SecurableResource =
             serde_json::from_value(value).expect("resource should deserialize");
-        assert_eq!(resource.resource_id, "root");
+        assert_eq!(resource.id, "root");
         assert_eq!(resource.children.len(), 1);
-        assert_eq!(resource.children[0].resource_id, "child");
+        assert_eq!(resource.children[0].id, "child");
     }
 
     #[test]
