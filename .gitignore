@@ -41,6 +41,7 @@
 !/src/security
 !/src/security/mod.rs
 !/src/security/types.rs
+!/src/security/constants.rs
 !/src/security/container.rs
 !/src/security/user.rs
 !/src/security/group.rs

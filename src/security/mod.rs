@@ -1,5 +1,6 @@
 //! Security module scaffolding and shared response vocabulary.
 
+mod constants;
 mod container;
 mod group;
 mod permission;
@@ -8,6 +9,7 @@ mod session;
 mod types;
 mod user;
 
+pub use constants::{PermissionRoles, PermissionTypes, SystemGroups};
 pub use container::{
     CreateContainerOptions, DeleteContainerOptions, GetContainersOptions, GetFolderTypesOptions,
     GetFolderTypesResponse, GetModulesOptions, GetModulesResponse, GetReadableContainersOptions,

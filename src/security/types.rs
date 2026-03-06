@@ -135,6 +135,13 @@ pub struct ContainerHierarchy {
     /// Child containers in the hierarchy.
     #[serde(default)]
     pub children: Vec<ContainerHierarchy>,
+    /// Effective permission unique names for the current user (present when
+    /// requested via `includeEffectivePermissions`).
+    #[serde(default)]
+    pub effective_permissions: Vec<String>,
+    /// Module properties associated with this container.
+    #[serde(default)]
+    pub module_properties: Vec<ModuleProperty>,
 }
 
 /// Key/value module property metadata.
@@ -144,9 +151,16 @@ pub struct ContainerHierarchy {
 pub struct ModuleProperty {
     /// Property key.
     pub name: String,
-    /// Property value.
+    /// Property value. Typed as `serde_json::Value` to match the JS `any`
+    /// typing — the server may send strings, numbers, booleans, or objects.
     #[serde(default)]
-    pub value: Option<String>,
+    pub value: Option<serde_json::Value>,
+    /// Effective (inherited) value after property inheritance resolution.
+    #[serde(default)]
+    pub effective_value: Option<serde_json::Value>,
+    /// Module that defines this property.
+    #[serde(default)]
+    pub module: Option<String>,
 }
 
 /// Folder type metadata returned by folder-type endpoints.
@@ -442,8 +456,8 @@ pub struct Policy {
 #[cfg(test)]
 mod tests {
     use super::{
-        Container, ContainerFormats, ContainerHierarchy, FolderType, Group, ModuleInfo, Policy,
-        PolicyAssignment, Role, SecurableResource, User,
+        Container, ContainerFormats, ContainerHierarchy, FolderType, Group, ModuleInfo,
+        ModuleProperty, Policy, PolicyAssignment, Role, SecurableResource, User,
     };
 
     #[test]
@@ -836,5 +850,154 @@ mod tests {
             !container
                 .has_effective_permission("org.labkey.api.security.permissions.ReadPermission")
         );
+    }
+
+    #[test]
+    fn container_hierarchy_deserializes_effective_permissions_and_module_properties() {
+        let value = serde_json::json!({
+            "id": "root",
+            "path": "/Home",
+            "type": "Project",
+            "children": [],
+            "effectivePermissions": [
+                "org.labkey.api.security.permissions.ReadPermission",
+                "org.labkey.api.security.permissions.InsertPermission"
+            ],
+            "moduleProperties": [
+                {
+                    "name": "site.prefix",
+                    "value": "LAB",
+                    "effectiveValue": "LAB",
+                    "module": "core"
+                }
+            ]
+        });
+        let h: ContainerHierarchy = serde_json::from_value(value).expect("valid hierarchy");
+        assert_eq!(h.effective_permissions.len(), 2);
+        assert_eq!(
+            h.effective_permissions[0],
+            "org.labkey.api.security.permissions.ReadPermission"
+        );
+        assert_eq!(h.module_properties.len(), 1);
+        assert_eq!(h.module_properties[0].name, "site.prefix");
+        assert_eq!(
+            h.module_properties[0].value,
+            Some(serde_json::Value::String("LAB".into()))
+        );
+        assert_eq!(h.module_properties[0].module.as_deref(), Some("core"));
+    }
+
+    #[test]
+    fn container_hierarchy_defaults_new_fields_when_absent() {
+        let value = serde_json::json!({
+            "id": "root",
+            "path": "/Home",
+            "children": []
+        });
+        let h: ContainerHierarchy = serde_json::from_value(value).expect("valid hierarchy");
+        assert!(h.effective_permissions.is_empty());
+        assert!(h.module_properties.is_empty());
+    }
+
+    #[test]
+    fn module_property_deserializes_all_fields() {
+        let value = serde_json::json!({
+            "name": "site.prefix",
+            "value": "LAB",
+            "effectiveValue": 42,
+            "module": "core"
+        });
+        let mp: ModuleProperty = serde_json::from_value(value).expect("valid module property");
+        assert_eq!(mp.name, "site.prefix");
+        assert_eq!(mp.value, Some(serde_json::Value::String("LAB".into())));
+        assert_eq!(
+            mp.effective_value,
+            Some(serde_json::Value::Number(42.into()))
+        );
+        assert_eq!(mp.module.as_deref(), Some("core"));
+    }
+
+    #[test]
+    fn module_property_value_accepts_non_string_json() {
+        let value = serde_json::json!({
+            "name": "max.retries",
+            "value": 5,
+            "effectiveValue": true
+        });
+        let mp: ModuleProperty = serde_json::from_value(value).expect("valid module property");
+        assert_eq!(mp.value, Some(serde_json::Value::Number(5.into())));
+        assert_eq!(mp.effective_value, Some(serde_json::Value::Bool(true)));
+        assert!(mp.module.is_none());
+    }
+
+    #[test]
+    fn module_property_minimal_deserialization() {
+        let value = serde_json::json!({"name": "some.prop"});
+        let mp: ModuleProperty = serde_json::from_value(value).expect("valid module property");
+        assert_eq!(mp.name, "some.prop");
+        assert!(mp.value.is_none());
+        assert!(mp.effective_value.is_none());
+        assert!(mp.module.is_none());
+    }
+
+    #[test]
+    fn module_property_value_accepts_nested_json_objects() {
+        let value = serde_json::json!({
+            "name": "complex.config",
+            "value": {"host": "localhost", "port": 8080},
+            "effectiveValue": [1, 2, 3]
+        });
+        let mp: ModuleProperty = serde_json::from_value(value).expect("valid module property");
+        let obj = mp.value.as_ref().and_then(serde_json::Value::as_object);
+        assert!(obj.is_some());
+        assert_eq!(
+            obj.and_then(|o| o.get("host")),
+            Some(&serde_json::json!("localhost"))
+        );
+        assert!(
+            mp.effective_value
+                .as_ref()
+                .and_then(serde_json::Value::as_array)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn module_info_deserializes_with_widened_properties() {
+        let value = serde_json::json!({
+            "name": "core",
+            "active": true,
+            "properties": [
+                {
+                    "name": "site.prefix",
+                    "value": "LAB",
+                    "effectiveValue": "LAB-INHERITED",
+                    "module": "core"
+                },
+                {
+                    "name": "max.retries",
+                    "value": 5
+                }
+            ]
+        });
+        let mi: ModuleInfo = serde_json::from_value(value).expect("valid module info");
+        assert_eq!(mi.properties.len(), 2);
+        assert_eq!(mi.properties[0].name, "site.prefix");
+        assert_eq!(
+            mi.properties[0].value,
+            Some(serde_json::Value::String("LAB".into()))
+        );
+        assert_eq!(
+            mi.properties[0].effective_value,
+            Some(serde_json::Value::String("LAB-INHERITED".into()))
+        );
+        assert_eq!(mi.properties[0].module.as_deref(), Some("core"));
+        assert_eq!(mi.properties[1].name, "max.retries");
+        assert_eq!(
+            mi.properties[1].value,
+            Some(serde_json::Value::Number(5.into()))
+        );
+        assert!(mi.properties[1].effective_value.is_none());
+        assert!(mi.properties[1].module.is_none());
     }
 }
