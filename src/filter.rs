@@ -72,6 +72,8 @@ pub enum FilterType {
 
     // Table-wise search
     Q,
+    /// SQL WHERE clause filter (Java-only, applies to the entire table).
+    Where,
 
     // Ontology operators
     OntologyInSubtree,
@@ -128,6 +130,7 @@ impl FilterType {
             Self::ArrayIsEmpty => "arrayisempty",
             Self::ArrayIsNotEmpty => "arrayisnotempty",
             Self::Q => "q",
+            Self::Where => "where",
             Self::OntologyInSubtree => "concept:insubtree",
             Self::OntologyNotInSubtree => "concept:notinsubtree",
             Self::ExpChildOf => "exp:childof",
@@ -190,7 +193,7 @@ impl FilterType {
     /// table-wise.
     #[must_use]
     pub fn is_table_wise(self) -> bool {
-        matches!(self, Self::Q)
+        matches!(self, Self::Q | Self::Where)
     }
 
     /// Look up a [`FilterType`] by its URL suffix.
@@ -243,6 +246,7 @@ impl FilterType {
         Self::ArrayIsEmpty,
         Self::ArrayIsNotEmpty,
         Self::Q,
+        Self::Where,
         Self::OntologyInSubtree,
         Self::OntologyNotInSubtree,
         Self::ExpChildOf,
@@ -321,6 +325,15 @@ impl Filter {
         )
     }
 
+    /// The column name this filter applies to.
+    ///
+    /// Table-wise filters like [`FilterType::Q`] and [`FilterType::Where`]
+    /// return `"*"`.
+    #[must_use]
+    pub fn column_name(&self) -> &str {
+        &self.column_name
+    }
+
     /// The URL parameter name for this filter (e.g., `"query.Age~eq"`).
     #[must_use]
     pub fn url_param_name(&self, data_region_name: &str) -> String {
@@ -337,11 +350,6 @@ impl Filter {
     /// For multi-valued filters, values are joined with the appropriate
     /// separator. If any value contains the separator character, the
     /// `{json:[...]}` encoding is used instead to avoid ambiguity.
-    ///
-    /// # Panics
-    ///
-    /// Panics if JSON serialization of a `Vec<String>` fails, which cannot
-    /// happen in practice since strings are always valid JSON values.
     #[must_use]
     pub fn url_param_value(&self) -> String {
         match (&self.value, self.op.separator()) {
@@ -350,10 +358,12 @@ impl Filter {
             (FilterValue::Multi(values), Some(sep)) => {
                 let needs_json = values.iter().any(|v| v.contains(sep));
                 if needs_json {
-                    // Serializing Vec<String> to JSON cannot fail — strings
-                    // are always valid JSON values.
-                    let json_array = serde_json::to_string(values)
-                        .expect("Vec<String> serialization is infallible");
+                    let json_array = serde_json::Value::Array(
+                        values
+                            .iter()
+                            .map(|v| serde_json::Value::String(v.clone()))
+                            .collect(),
+                    );
                     format!("{{json:{json_array}}}")
                 } else {
                     let sep_str = String::from(sep);
@@ -386,6 +396,39 @@ pub fn encode_filters(filters: &[Filter], data_region_name: &str) -> Vec<(String
         })
         .map(|f| (f.url_param_name(data_region_name), f.url_param_value()))
         .collect()
+}
+
+/// Merge filters by replacing all filters on a given column.
+///
+/// Returns a new filter list containing every filter from `base_filters`
+/// whose column name does not match `column_name`, followed by all filters
+/// from `column_filters`. This matches the JS `Filter.merge` function.
+///
+/// # Examples
+///
+/// ```
+/// use labkey_rs::filter::{Filter, FilterType, merge};
+///
+/// let base = vec![
+///     Filter::equal("Name", "Alice"),
+///     Filter::equal("Age", "30"),
+/// ];
+/// let replacement = vec![Filter::equal("Name", "Bob")];
+/// let merged = merge(&base, "Name", &replacement);
+///
+/// assert_eq!(merged.len(), 2);
+/// assert_eq!(merged[0].column_name(), "Age");
+/// assert_eq!(merged[1].column_name(), "Name");
+/// ```
+#[must_use]
+pub fn merge(base_filters: &[Filter], column_name: &str, column_filters: &[Filter]) -> Vec<Filter> {
+    let mut result: Vec<Filter> = base_filters
+        .iter()
+        .filter(|f| f.column_name() != column_name)
+        .cloned()
+        .collect();
+    result.extend(column_filters.iter().cloned());
+    result
 }
 
 /// Container filter scope for queries.
@@ -721,11 +764,12 @@ mod tests {
             | FilterType::ArrayIsEmpty
             | FilterType::ArrayIsNotEmpty
             | FilterType::Q
+            | FilterType::Where
             | FilterType::OntologyInSubtree
             | FilterType::OntologyNotInSubtree
             | FilterType::ExpChildOf
             | FilterType::ExpParentOf
-            | FilterType::ExpLineageOf => 42,
+            | FilterType::ExpLineageOf => 43,
         }
     }
 
@@ -745,6 +789,143 @@ mod tests {
         for ft in FilterType::ALL {
             assert!(seen.insert(ft), "duplicate in ALL: {ft:?}");
         }
+    }
+
+    #[test]
+    fn where_filter_is_table_wise_and_uses_star_column() {
+        let f = Filter::new(
+            "ignored",
+            FilterType::Where,
+            FilterValue::Single("x > 5".into()),
+        );
+        assert_eq!(f.column_name(), "*");
+        assert_eq!(f.url_param_name("query"), "query.*~where");
+        assert_eq!(f.url_param_value(), "x > 5");
+        assert!(FilterType::Where.is_table_wise());
+        assert!(FilterType::Where.requires_value());
+        assert!(!FilterType::Where.is_multi_valued());
+    }
+
+    #[test]
+    fn filter_type_url_suffix_snapshot() {
+        // Exhaustive snapshot of every FilterType's URL suffix, separator,
+        // requires_value, and is_table_wise. Adding or changing a variant
+        // will cause this test to fail, forcing an explicit review.
+        let expected: Vec<(&str, Option<char>, bool, bool)> = vec![
+            ("eq", None, true, false),
+            ("neq", None, true, false),
+            ("neqornull", None, true, false),
+            ("gt", None, true, false),
+            ("gte", None, true, false),
+            ("lt", None, true, false),
+            ("lte", None, true, false),
+            ("in", Some(';'), true, false),
+            ("notin", Some(';'), true, false),
+            ("contains", None, true, false),
+            ("doesnotcontain", None, true, false),
+            ("startswith", None, true, false),
+            ("doesnotstartwith", None, true, false),
+            ("containsoneof", Some(';'), true, false),
+            ("containsnoneof", Some(';'), true, false),
+            ("between", Some(','), true, false),
+            ("notbetween", Some(','), true, false),
+            ("isblank", None, false, false),
+            ("isnonblank", None, false, false),
+            ("", None, false, false),
+            ("memberof", None, true, false),
+            ("hasmvvalue", None, false, false),
+            ("nomvvalue", None, false, false),
+            ("dateeq", None, true, false),
+            ("dateneq", None, true, false),
+            ("dategt", None, true, false),
+            ("dategte", None, true, false),
+            ("datelt", None, true, false),
+            ("datelte", None, true, false),
+            ("arraycontainsall", Some(';'), true, false),
+            ("arraycontainsany", Some(';'), true, false),
+            ("arraymatches", Some(';'), true, false),
+            ("arraynotmatches", Some(';'), true, false),
+            ("arraycontainsnone", Some(';'), true, false),
+            ("arrayisempty", None, false, false),
+            ("arrayisnotempty", None, false, false),
+            ("q", None, true, true),
+            ("where", None, true, true),
+            ("concept:insubtree", None, true, false),
+            ("concept:notinsubtree", None, true, false),
+            ("exp:childof", None, true, false),
+            ("exp:parentof", None, true, false),
+            ("exp:lineageof", Some(','), true, false),
+        ];
+
+        assert_eq!(
+            FilterType::ALL.len(),
+            expected.len(),
+            "snapshot length mismatch — update expected list when adding variants"
+        );
+
+        for (ft, (suffix, sep, requires_val, table_wise)) in
+            FilterType::ALL.iter().zip(expected.iter())
+        {
+            assert_eq!(ft.url_suffix(), *suffix, "url_suffix mismatch for {ft:?}");
+            assert_eq!(ft.separator(), *sep, "separator mismatch for {ft:?}");
+            assert_eq!(
+                ft.requires_value(),
+                *requires_val,
+                "requires_value mismatch for {ft:?}"
+            );
+            assert_eq!(
+                ft.is_table_wise(),
+                *table_wise,
+                "is_table_wise mismatch for {ft:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn merge_replaces_column_filters() {
+        let base = vec![
+            Filter::equal("Name", "Alice"),
+            Filter::equal("Age", "30"),
+            Filter::equal("Name", "Bob"),
+        ];
+        let replacement = vec![Filter::equal("Name", "Charlie")];
+        let merged = merge(&base, "Name", &replacement);
+
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].column_name(), "Age");
+        assert_eq!(merged[0].url_param_value(), "30");
+        assert_eq!(merged[1].column_name(), "Name");
+        assert_eq!(merged[1].url_param_value(), "Charlie");
+    }
+
+    #[test]
+    fn merge_with_empty_replacement_removes_column() {
+        let base = vec![Filter::equal("Name", "Alice"), Filter::equal("Age", "30")];
+        let merged = merge(&base, "Name", &[]);
+
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].column_name(), "Age");
+    }
+
+    #[test]
+    fn merge_with_no_matching_column_preserves_all() {
+        let base = vec![Filter::equal("Name", "Alice"), Filter::equal("Age", "30")];
+        let replacement = vec![Filter::equal("Status", "Active")];
+        let merged = merge(&base, "Status", &replacement);
+
+        assert_eq!(merged.len(), 3);
+        assert_eq!(merged[0].column_name(), "Name");
+        assert_eq!(merged[1].column_name(), "Age");
+        assert_eq!(merged[2].column_name(), "Status");
+    }
+
+    #[test]
+    fn merge_with_empty_base_returns_column_filters() {
+        let replacement = vec![Filter::equal("Name", "Alice")];
+        let merged = merge(&[], "Name", &replacement);
+
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].url_param_value(), "Alice");
     }
 
     #[test]

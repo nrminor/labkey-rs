@@ -71,6 +71,21 @@ pub struct Container {
     pub start_url: Option<String>,
 }
 
+impl Container {
+    /// Check whether the current user has a specific effective permission on
+    /// this container.
+    ///
+    /// The `effective_permissions` field must have been populated by the server
+    /// (request the container with `includeEffectivePermissions=true`). If the
+    /// field is empty, this always returns `false`.
+    ///
+    /// Matches the JS `hasEffectivePermission` helper from `Permission.ts`.
+    #[must_use]
+    pub fn has_effective_permission(&self, permission: &str) -> bool {
+        self.effective_permissions.iter().any(|p| p == permission)
+    }
+}
+
 /// Date, time, and number format strings associated with a container.
 ///
 /// The JS `Container` interface nests these under a `formats` object with
@@ -791,5 +806,35 @@ mod tests {
         assert_eq!(mi.required, Some(false));
         assert_eq!(mi.require_site_permission, Some(false));
         assert_eq!(mi.tab_name.as_deref(), Some("Study"));
+    }
+
+    #[test]
+    fn has_effective_permission_finds_matching_permission() {
+        let container: Container = serde_json::from_value(serde_json::json!({
+            "effectivePermissions": [
+                "org.labkey.api.security.permissions.ReadPermission",
+                "org.labkey.api.security.permissions.InsertPermission"
+            ]
+        }))
+        .expect("valid container");
+
+        assert!(
+            container
+                .has_effective_permission("org.labkey.api.security.permissions.ReadPermission")
+        );
+        assert!(
+            !container
+                .has_effective_permission("org.labkey.api.security.permissions.DeletePermission")
+        );
+    }
+
+    #[test]
+    fn has_effective_permission_returns_false_when_empty() {
+        let container: Container =
+            serde_json::from_value(serde_json::json!({})).expect("valid container");
+        assert!(
+            !container
+                .has_effective_permission("org.labkey.api.security.permissions.ReadPermission")
+        );
     }
 }

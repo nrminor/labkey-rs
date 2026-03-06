@@ -660,6 +660,8 @@ pub struct GetQueryDetailsOptions {
     pub initialize_missing_view: Option<bool>,
     /// Include trigger metadata in the response.
     pub include_triggers: Option<bool>,
+    /// Include suggested columns from related tables (Java-only parameter).
+    pub include_suggested_query_columns: Option<bool>,
 }
 
 /// Options for [`LabkeyClient::get_queries`].
@@ -2044,6 +2046,10 @@ impl LabkeyClient {
             opt("fk", options.fk),
             opt("initializeMissingView", options.initialize_missing_view),
             opt("includeTriggers", options.include_triggers),
+            opt(
+                "includeSuggestedQueryColumns",
+                options.include_suggested_query_columns,
+            ),
         ]
         .into_iter()
         .flatten()

@@ -306,7 +306,7 @@ impl LabkeyClient {
         url: Url,
         options: &RequestOptions,
     ) -> Result<reqwest::Request, LabkeyError> {
-        let builder = client.post(url);
+        let builder = client.post(url).header("Content-Type", "application/json");
         let builder = self.prepare_request(builder);
         let builder = Self::apply_request_options(builder, options);
         Ok(builder.build()?)
@@ -319,7 +319,10 @@ impl LabkeyClient {
         params: &[(String, String)],
         options: &RequestOptions,
     ) -> Result<reqwest::Request, LabkeyError> {
-        let builder = client.post(url).query(params);
+        let builder = client
+            .post(url)
+            .query(params)
+            .header("Content-Type", "application/json");
         let builder = self.prepare_request(builder);
         let builder = Self::apply_request_options(builder, options);
         Ok(builder.build()?)
@@ -845,6 +848,13 @@ mod tests {
                 .get("authorization")
                 .and_then(|v| v.to_str().ok()),
             Some("Basic YXBpa2V5OnRlc3Qta2V5")
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok()),
+            Some("application/json")
         );
     }
 }
