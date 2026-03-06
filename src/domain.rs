@@ -397,6 +397,10 @@ pub struct ValidateNameExpressionsOptions {
     pub options: Option<serde_json::Value>,
     /// Domain kind.
     pub kind: Option<DomainKind>,
+    /// When `Some(true)`, include generated name preview in the response.
+    /// Omitted from the request when `None`; the server treats omission as
+    /// `false`.
+    pub include_name_preview: Option<bool>,
 }
 
 /// Options for [`LabkeyClient::get_domain_name_previews`].
@@ -529,6 +533,8 @@ struct ValidateNameExpressionsBody {
     options: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     kind: Option<DomainKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    include_name_preview: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -546,7 +552,7 @@ struct GetPropertiesBody {
     offset: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     property_ids: Option<Vec<i64>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "propertyURIs", skip_serializing_if = "Option::is_none")]
     property_uris: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     search: Option<String>,
@@ -969,6 +975,7 @@ impl LabkeyClient {
             domain_design: options.domain_design,
             options: options.options,
             kind: options.kind,
+            include_name_preview: options.include_name_preview,
         };
 
         self.post(url, &body).await
@@ -1426,5 +1433,120 @@ mod tests {
         assert_eq!(restored.filter.as_deref(), Some("~eq=100"));
         assert!(restored.italic);
         assert!(!restored.bold);
+    }
+
+    #[test]
+    fn get_properties_body_serializes_property_uris_with_acronym_casing() {
+        let body = GetPropertiesBody {
+            domain_ids: None,
+            domain_kinds: None,
+            filters: None,
+            max_rows: None,
+            offset: None,
+            property_ids: None,
+            property_uris: Some(vec!["urn:test".to_string()]),
+            search: None,
+            sort: None,
+        };
+        let json = serde_json::to_value(body).expect("serialize get_properties body");
+        assert!(
+            json.get("propertyURIs").is_some(),
+            "expected key propertyURIs (acronym casing), got keys: {:?}",
+            json.as_object().map(|o| o.keys().collect::<Vec<_>>())
+        );
+        assert!(
+            json.get("propertyUris").is_none(),
+            "camelCase propertyUris must not be emitted"
+        );
+        assert_eq!(json["propertyURIs"], serde_json::json!(["urn:test"]));
+    }
+
+    #[test]
+    fn validate_name_expressions_body_serializes_include_name_preview() {
+        let body_with = ValidateNameExpressionsBody {
+            domain_design: None,
+            options: None,
+            kind: None,
+            include_name_preview: Some(true),
+        };
+        let json = serde_json::to_value(body_with).expect("serialize");
+        assert_eq!(json["includeNamePreview"], serde_json::json!(true));
+
+        let body_without = ValidateNameExpressionsBody {
+            domain_design: None,
+            options: None,
+            kind: None,
+            include_name_preview: None,
+        };
+        let json = serde_json::to_value(body_without).expect("serialize");
+        assert!(
+            json.get("includeNamePreview").is_none(),
+            "includeNamePreview must be omitted when None"
+        );
+
+        let body_false = ValidateNameExpressionsBody {
+            domain_design: None,
+            options: None,
+            kind: None,
+            include_name_preview: Some(false),
+        };
+        let json = serde_json::to_value(body_false).expect("serialize");
+        assert_eq!(
+            json["includeNamePreview"],
+            serde_json::json!(false),
+            "explicit false must be emitted, not skipped"
+        );
+    }
+
+    #[test]
+    fn get_properties_body_omits_property_uris_when_none() {
+        let body = GetPropertiesBody {
+            domain_ids: None,
+            domain_kinds: None,
+            filters: None,
+            max_rows: None,
+            offset: None,
+            property_ids: None,
+            property_uris: None,
+            search: None,
+            sort: None,
+        };
+        let json = serde_json::to_value(body).expect("serialize empty get_properties body");
+        assert!(
+            json.get("propertyURIs").is_none(),
+            "propertyURIs must be omitted when None"
+        );
+        assert!(
+            json.get("propertyUris").is_none(),
+            "buggy camelCase key must never appear"
+        );
+    }
+
+    #[tokio::test]
+    async fn validate_name_expressions_passes_include_name_preview_to_request_body() {
+        let client = test_client();
+        let options = ValidateNameExpressionsOptions::builder()
+            .include_name_preview(true)
+            .build();
+
+        let url = client.build_url(
+            "property",
+            "validateNameExpressions.api",
+            options.container_path.as_deref(),
+        );
+        let body = ValidateNameExpressionsBody {
+            domain_design: options.domain_design,
+            options: options.options,
+            kind: options.kind,
+            include_name_preview: options.include_name_preview,
+        };
+        let json = serde_json::to_value(&body).expect("serialize");
+
+        assert_eq!(json["includeNamePreview"], serde_json::json!(true));
+        assert!(
+            url.as_str()
+                .contains("property-validateNameExpressions.api"),
+            "endpoint URL must target validateNameExpressions"
+        );
     }
 }

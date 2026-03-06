@@ -687,8 +687,8 @@
         "`just check` passes (fmt, clippy with warnings denied, all tests, doc build)"
       ],
       "priority": 35,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented US-035 in src/domain.rs. Fixed GetPropertiesBody.property_uris wire key from incorrect camelCase propertyUris to correct acronym-cased propertyURIs via explicit #[serde(rename = \"propertyURIs\")] override, matching the existing URI acronym convention used for domainURI/conceptURI/propertyURI fields. Added include_name_preview: Option<bool> to ValidateNameExpressionsOptions and to the internal ValidateNameExpressionsBody with skip_serializing_if for proper omission semantics, and wired the field through the validate_name_expressions endpoint method. Added doc comment clarifying that omission is treated as false by the server. Added unit tests for propertyURIs key presence and absence of buggy camelCase key, includeNamePreview emission when Some(true)/Some(false) and omission when None, propertyURIs omission when None, and an endpoint wiring test confirming options.include_name_preview reaches the request body through the public API. Solicited feedback from nick-isms/testing-guru/semver-nag, addressed testing-guru must-fix (wiring test) and edge-case suggestions (Some(false) emission, None omission for propertyURIs), and verified all quality gates with just check after implementation and after feedback-driven updates."
     },
     {
       "id": "US-036",
