@@ -1169,9 +1169,13 @@ pub struct QueryLookup {
     /// Query name for the lookup target.
     #[serde(default)]
     pub query_name: Option<String>,
-    /// Schema name for the lookup target.
+    /// Schema name for the lookup target (canonical form).
     #[serde(default)]
     pub schema_name: Option<String>,
+    /// Schema name alias — some server versions send a bare `schema` key
+    /// alongside `schemaName`. Both carry the same value in practice.
+    #[serde(default)]
+    pub schema: Option<String>,
     /// Table name for the lookup target (may differ from `query_name`).
     #[serde(default)]
     pub table: Option<String>,
@@ -4746,6 +4750,7 @@ mod tests {
         let json = serde_json::json!({
             "queryName": "Users",
             "schemaName": "core",
+            "schema": "core",
             "keyColumn": "UserId",
             "table": "Users",
             "multiValued": "junction",
@@ -4753,6 +4758,7 @@ mod tests {
             "filterGroups": [{"name": "active"}]
         });
         let lookup: QueryLookup = serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(lookup.schema.as_deref(), Some("core"));
         assert_eq!(lookup.table.as_deref(), Some("Users"));
         assert_eq!(lookup.multi_valued.as_deref(), Some("junction"));
         assert_eq!(lookup.junction_lookup.as_deref(), Some("MemberOf"));
@@ -4769,6 +4775,7 @@ mod tests {
             "schemaName": "core"
         });
         let lookup: QueryLookup = serde_json::from_value(json).expect("should deserialize");
+        assert!(lookup.schema.is_none());
         assert!(lookup.table.is_none());
         assert!(lookup.multi_valued.is_none());
         assert!(lookup.junction_lookup.is_none());
