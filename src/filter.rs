@@ -188,6 +188,66 @@ impl FilterType {
         }
     }
 
+    /// Human-readable display text for this filter type.
+    ///
+    /// Returns labels like `"Equals"`, `"Is Greater Than"`, or
+    /// `"Does Not Contain"`. These match the `displayText` property from
+    /// the upstream JS client and the `displayValue` field from the Java
+    /// client's `Filter.Operator` enum.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use labkey_rs::filter::FilterType;
+    ///
+    /// assert_eq!(FilterType::Equal.display_text(), "Equals");
+    /// assert_eq!(FilterType::GreaterThan.display_text(), "Is Greater Than");
+    /// assert_eq!(FilterType::IsBlank.display_text(), "Is Blank");
+    /// ```
+    #[must_use]
+    pub fn display_text(self) -> &'static str {
+        match self {
+            Self::Equal | Self::DateEqual => "Equals",
+            Self::NotEqual | Self::DateNotEqual | Self::NotEqualOrNull => "Does Not Equal",
+            Self::GreaterThan | Self::DateGreaterThan => "Is Greater Than",
+            Self::GreaterThanOrEqual | Self::DateGreaterThanOrEqual => {
+                "Is Greater Than or Equal To"
+            }
+            Self::LessThan | Self::DateLessThan => "Is Less Than",
+            Self::LessThanOrEqual | Self::DateLessThanOrEqual => "Is Less Than or Equal To",
+            Self::In => "Equals One Of",
+            Self::NotIn => "Does Not Equal Any Of",
+            Self::Contains => "Contains",
+            Self::DoesNotContain => "Does Not Contain",
+            Self::StartsWith => "Starts With",
+            Self::DoesNotStartWith => "Does Not Start With",
+            Self::ContainsOneOf => "Contains One Of",
+            Self::ContainsNoneOf => "Does Not Contain Any Of",
+            Self::Between => "Between",
+            Self::NotBetween => "Not Between",
+            Self::IsBlank => "Is Blank",
+            Self::IsNotBlank => "Is Not Blank",
+            Self::HasAnyValue => "Has Any Value",
+            Self::MemberOf => "Member Of",
+            Self::HasMissingValue => "Has a missing value indicator",
+            Self::DoesNotHaveMissingValue => "Does not have a missing value indicator",
+            Self::ArrayContainsAll => "Contains All",
+            Self::ArrayContainsAny => "Contains Any",
+            Self::ArrayContainsExact => "Contains Exactly",
+            Self::ArrayContainsNotExact => "Does Not Contain Exactly",
+            Self::ArrayContainsNone => "Contains None",
+            Self::ArrayIsEmpty => "Is Empty",
+            Self::ArrayIsNotEmpty => "Is Not Empty",
+            Self::Q => "Search",
+            Self::Where => "Where",
+            Self::OntologyInSubtree => "Is In Subtree",
+            Self::OntologyNotInSubtree => "Is Not In Subtree",
+            Self::ExpChildOf => "Is Child Of",
+            Self::ExpParentOf => "Is Parent Of",
+            Self::ExpLineageOf => "In The Lineage Of",
+        }
+    }
+
     /// Whether this filter applies to the entire table rather than a
     /// specific column. Currently only [`FilterType::Q`] (search) is
     /// table-wise.
@@ -205,6 +265,117 @@ impl FilterType {
             .iter()
             .copied()
             .find(|ft| ft.url_suffix() == suffix)
+    }
+
+    /// The canonical programmatic name for this filter type.
+    ///
+    /// Returns the `LabKey` cross-client canonical name as used by the Java
+    /// client's `Filter.Operator.getProgrammaticName()`. These names appear
+    /// in server configurations and are the primary keys accepted by
+    /// [`from_name`](Self::from_name).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use labkey_rs::filter::FilterType;
+    ///
+    /// assert_eq!(FilterType::Equal.programmatic_name(), "EQUAL");
+    /// assert_eq!(FilterType::IsBlank.programmatic_name(), "MISSING");
+    /// assert_eq!(FilterType::GreaterThan.programmatic_name(), "GREATER_THAN");
+    /// ```
+    #[must_use]
+    pub fn programmatic_name(self) -> &'static str {
+        match self {
+            Self::Equal => "EQUAL",
+            Self::NotEqual => "NOT_EQUAL",
+            Self::NotEqualOrNull => "NOT_EQUAL_OR_MISSING",
+            Self::GreaterThan => "GREATER_THAN",
+            Self::GreaterThanOrEqual => "GREATER_THAN_OR_EQUAL",
+            Self::LessThan => "LESS_THAN",
+            Self::LessThanOrEqual => "LESS_THAN_OR_EQUAL",
+            Self::In => "IN",
+            Self::NotIn => "NOT_IN",
+            Self::Contains => "CONTAINS",
+            Self::DoesNotContain => "DOES_NOT_CONTAIN",
+            Self::StartsWith => "STARTS_WITH",
+            Self::DoesNotStartWith => "DOES_NOT_START_WITH",
+            Self::ContainsOneOf => "CONTAINS_ONE_OF",
+            Self::ContainsNoneOf => "CONTAINS_NONE_OF",
+            Self::Between => "BETWEEN",
+            Self::NotBetween => "NOT_BETWEEN",
+            Self::IsBlank => "MISSING",
+            Self::IsNotBlank => "NOT_MISSING",
+            Self::HasAnyValue => "HAS_ANY_VALUE",
+            Self::MemberOf => "MEMBER_OF",
+            Self::HasMissingValue => "MV_INDICATOR",
+            Self::DoesNotHaveMissingValue => "NO_MV_INDICATOR",
+            Self::DateEqual => "DATE_EQUAL",
+            Self::DateNotEqual => "DATE_NOT_EQUAL",
+            Self::DateGreaterThan => "DATE_GREATER_THAN",
+            Self::DateGreaterThanOrEqual => "DATE_GREATER_THAN_OR_EQUAL",
+            Self::DateLessThan => "DATE_LESS_THAN",
+            Self::DateLessThanOrEqual => "DATE_LESS_THAN_OR_EQUAL",
+            Self::ArrayContainsAll => "ARRAY_CONTAINS_ALL",
+            Self::ArrayContainsAny => "ARRAY_CONTAINS_ANY",
+            Self::ArrayContainsExact => "ARRAY_CONTAINS_EXACT",
+            Self::ArrayContainsNotExact => "ARRAY_CONTAINS_NOT_EXACT",
+            Self::ArrayContainsNone => "ARRAY_CONTAINS_NONE",
+            Self::ArrayIsEmpty => "ARRAY_ISEMPTY",
+            Self::ArrayIsNotEmpty => "ARRAY_ISNOTEMPTY",
+            Self::Q => "Q",
+            Self::Where => "WHERE",
+            Self::OntologyInSubtree => "ONTOLOGY_IN_SUBTREE",
+            Self::OntologyNotInSubtree => "ONTOLOGY_NOT_IN_SUBTREE",
+            Self::ExpChildOf => "EXP_CHILD_OF",
+            Self::ExpParentOf => "EXP_PARENT_OF",
+            Self::ExpLineageOf => "EXP_LINEAGE_OF",
+        }
+    }
+
+    /// Look up a [`FilterType`] by its `LabKey` programmatic name.
+    ///
+    /// Accepts the canonical names returned by
+    /// [`programmatic_name`](Self::programmatic_name) (e.g., `"EQUAL"`,
+    /// `"GREATER_THAN"`, `"MISSING"`). Also accepts the JS `Types` object
+    /// keys where they differ from the Java names (e.g., `"ISBLANK"` as an
+    /// alias for `"MISSING"`).
+    ///
+    /// Returns `None` if the name doesn't match any known filter type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use labkey_rs::filter::FilterType;
+    ///
+    /// // Java programmatic name
+    /// assert_eq!(FilterType::from_name("GREATER_THAN"), Some(FilterType::GreaterThan));
+    ///
+    /// // JS alias
+    /// assert_eq!(FilterType::from_name("ISBLANK"), Some(FilterType::IsBlank));
+    ///
+    /// // Unknown name
+    /// assert_eq!(FilterType::from_name("NOPE"), None);
+    /// ```
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        // Primary: check canonical programmatic names.
+        let primary = Self::ALL
+            .iter()
+            .copied()
+            .find(|ft| ft.programmatic_name() == name);
+        if primary.is_some() {
+            return primary;
+        }
+
+        // Secondary: JS Types keys that differ from Java programmatic names.
+        match name {
+            "NEQ_OR_NULL" => Some(Self::NotEqualOrNull),
+            "ISBLANK" => Some(Self::IsBlank),
+            "NONBLANK" => Some(Self::IsNotBlank),
+            "HAS_MISSING_VALUE" => Some(Self::HasMissingValue),
+            "DOES_NOT_HAVE_MISSING_VALUE" => Some(Self::DoesNotHaveMissingValue),
+            _ => None,
+        }
     }
 
     /// All filter type variants, for iteration and lookup.
@@ -325,6 +496,12 @@ impl Filter {
         )
     }
 
+    /// The filter operator.
+    #[must_use]
+    pub fn filter_type(&self) -> FilterType {
+        self.op
+    }
+
     /// The column name this filter applies to.
     ///
     /// Table-wise filters like [`FilterType::Q`] and [`FilterType::Where`]
@@ -429,6 +606,135 @@ pub fn merge(base_filters: &[Filter], column_name: &str, column_filters: &[Filte
         .collect();
     result.extend(column_filters.iter().cloned());
     result
+}
+
+/// Build a human-readable description of a list of filters.
+///
+/// Joins each filter's [`display_text`](FilterType::display_text) and value
+/// with `" AND "`, producing strings like
+/// `"Is Greater Than 10 AND Is Less Than 100"`.
+///
+/// This is the Rust equivalent of the JS client's `getFilterDescription`
+/// function, but operates on an already-parsed filter slice rather than a
+/// raw URL.
+///
+/// # Examples
+///
+/// ```
+/// use labkey_rs::filter::{Filter, FilterType, FilterValue, description};
+///
+/// let filters = vec![
+///     Filter::new("Age", FilterType::GreaterThan, FilterValue::Single("10".into())),
+///     Filter::new("Age", FilterType::LessThan, FilterValue::Single("100".into())),
+/// ];
+/// assert_eq!(
+///     description(&filters),
+///     "Is Greater Than 10 AND Is Less Than 100",
+/// );
+/// ```
+#[must_use]
+pub fn description(filters: &[Filter]) -> String {
+    filters
+        .iter()
+        .map(|f| {
+            let text = f.filter_type().display_text();
+            let value = f.url_param_value();
+            if value.is_empty() {
+                text.to_string()
+            } else {
+                format!("{text} {value}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
+/// Parse filter parameters from key-value pairs back into [`Filter`] objects.
+///
+/// This is the inverse of [`encode_filters`]: given an iterator of
+/// `(key, value)` parameter pairs and a data region name, it finds entries
+/// matching the `{dataRegionName}.{column}~{suffix}` pattern, looks up the
+/// filter type by URL suffix, and reconstructs the corresponding filters.
+///
+/// Parameters whose suffix doesn't match a known [`FilterType`] are
+/// silently skipped, matching the JS client's behavior.
+///
+/// # Examples
+///
+/// ```
+/// use labkey_rs::filter::{Filter, FilterType, from_parameters, encode_filters};
+///
+/// // Round-trip: encode then parse back
+/// let original = vec![
+///     Filter::equal("Name", "Alice"),
+///     Filter::new(
+///         "Age",
+///         FilterType::GreaterThan,
+///         labkey_rs::filter::FilterValue::Single("21".into()),
+///     ),
+/// ];
+/// let params = encode_filters(&original, "query");
+/// let recovered: Vec<Filter> = from_parameters(
+///     params.iter().map(|(k, v)| (k.as_str(), v.as_str())),
+///     "query",
+/// );
+/// assert_eq!(recovered.len(), 2);
+/// assert_eq!(recovered[0].column_name(), "Name");
+/// assert_eq!(recovered[1].column_name(), "Age");
+/// ```
+pub fn from_parameters<'a>(
+    params: impl IntoIterator<Item = (&'a str, &'a str)>,
+    data_region_name: &str,
+) -> Vec<Filter> {
+    let prefix = format!("{data_region_name}.");
+    let mut filters = Vec::new();
+
+    for (key, value) in params {
+        let Some(rest) = key.strip_prefix(&prefix) else {
+            continue;
+        };
+        let Some(tilde_pos) = rest.find('~') else {
+            continue;
+        };
+        let column_name = &rest[..tilde_pos];
+        let suffix = &rest[tilde_pos + 1..];
+
+        let Some(filter_type) = FilterType::from_url_suffix(suffix) else {
+            continue;
+        };
+
+        let filter_value = if !filter_type.requires_value() {
+            FilterValue::None
+        } else if filter_type.is_multi_valued() {
+            parse_multi_value(value, filter_type)
+        } else {
+            FilterValue::Single(value.to_string())
+        };
+
+        filters.push(Filter::new(column_name, filter_type, filter_value));
+    }
+
+    filters
+}
+
+/// Parse a multi-valued filter parameter string into a [`FilterValue::Multi`].
+///
+/// Handles both the `{json:[...]}` encoding and plain separator-delimited
+/// values.
+fn parse_multi_value(value: &str, filter_type: FilterType) -> FilterValue {
+    if value.starts_with("{json:") && value.ends_with('}') {
+        let inner = &value["{json:".len()..value.len() - 1];
+        if let Ok(values) = serde_json::from_str::<Vec<String>>(inner) {
+            return FilterValue::Multi(values);
+        }
+    }
+
+    if let Some(sep) = filter_type.separator() {
+        let values: Vec<String> = value.split(sep).map(String::from).collect();
+        FilterValue::Multi(values)
+    } else {
+        FilterValue::Single(value.to_string())
+    }
 }
 
 /// Container filter scope for queries.
@@ -1011,5 +1317,319 @@ mod tests {
                 serde_json::from_str(&json).expect("should deserialize");
             assert_eq!(recovered, cf, "round-trip failed for {cf:?}");
         }
+    }
+
+    // ── display_text tests ──────────────────────────────────────────
+
+    #[test]
+    fn display_text_covers_all_variants() {
+        for ft in FilterType::ALL {
+            let text = ft.display_text();
+            assert!(
+                !text.is_empty(),
+                "display_text for {ft:?} should not be empty"
+            );
+        }
+    }
+
+    #[test]
+    fn display_text_matches_upstream_js_values() {
+        // Spot-check a representative sample against the JS Types.ts displayText values.
+        assert_eq!(FilterType::Equal.display_text(), "Equals");
+        assert_eq!(FilterType::NotEqual.display_text(), "Does Not Equal");
+        assert_eq!(FilterType::GreaterThan.display_text(), "Is Greater Than");
+        assert_eq!(
+            FilterType::GreaterThanOrEqual.display_text(),
+            "Is Greater Than or Equal To"
+        );
+        assert_eq!(FilterType::LessThan.display_text(), "Is Less Than");
+        assert_eq!(
+            FilterType::LessThanOrEqual.display_text(),
+            "Is Less Than or Equal To"
+        );
+        assert_eq!(FilterType::In.display_text(), "Equals One Of");
+        assert_eq!(FilterType::NotIn.display_text(), "Does Not Equal Any Of");
+        assert_eq!(FilterType::Contains.display_text(), "Contains");
+        assert_eq!(
+            FilterType::DoesNotContain.display_text(),
+            "Does Not Contain"
+        );
+        assert_eq!(FilterType::StartsWith.display_text(), "Starts With");
+        assert_eq!(
+            FilterType::DoesNotStartWith.display_text(),
+            "Does Not Start With"
+        );
+        assert_eq!(FilterType::ContainsOneOf.display_text(), "Contains One Of");
+        assert_eq!(
+            FilterType::ContainsNoneOf.display_text(),
+            "Does Not Contain Any Of"
+        );
+        assert_eq!(FilterType::Between.display_text(), "Between");
+        assert_eq!(FilterType::NotBetween.display_text(), "Not Between");
+        assert_eq!(FilterType::IsBlank.display_text(), "Is Blank");
+        assert_eq!(FilterType::IsNotBlank.display_text(), "Is Not Blank");
+        assert_eq!(FilterType::HasAnyValue.display_text(), "Has Any Value");
+        assert_eq!(FilterType::MemberOf.display_text(), "Member Of");
+        assert_eq!(FilterType::Q.display_text(), "Search");
+    }
+
+    #[test]
+    fn display_text_date_variants_match_non_date_counterparts() {
+        // JS reuses the same displayText for date variants.
+        assert_eq!(
+            FilterType::DateEqual.display_text(),
+            FilterType::Equal.display_text()
+        );
+        assert_eq!(
+            FilterType::DateNotEqual.display_text(),
+            FilterType::NotEqual.display_text()
+        );
+        assert_eq!(
+            FilterType::DateGreaterThan.display_text(),
+            FilterType::GreaterThan.display_text()
+        );
+        assert_eq!(
+            FilterType::DateLessThan.display_text(),
+            FilterType::LessThan.display_text()
+        );
+        assert_eq!(
+            FilterType::DateGreaterThanOrEqual.display_text(),
+            FilterType::GreaterThanOrEqual.display_text()
+        );
+        assert_eq!(
+            FilterType::DateLessThanOrEqual.display_text(),
+            FilterType::LessThanOrEqual.display_text()
+        );
+    }
+
+    // ── programmatic_name / from_name tests ─────────────────────────
+
+    #[test]
+    fn programmatic_name_round_trips_through_from_name() {
+        for ft in FilterType::ALL {
+            let name = ft.programmatic_name();
+            let recovered = FilterType::from_name(name);
+            assert_eq!(
+                recovered,
+                Some(*ft),
+                "from_name round-trip failed for {ft:?} with name {name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn from_name_accepts_js_aliases() {
+        assert_eq!(
+            FilterType::from_name("NEQ_OR_NULL"),
+            Some(FilterType::NotEqualOrNull)
+        );
+        assert_eq!(FilterType::from_name("ISBLANK"), Some(FilterType::IsBlank));
+        assert_eq!(
+            FilterType::from_name("NONBLANK"),
+            Some(FilterType::IsNotBlank)
+        );
+        assert_eq!(
+            FilterType::from_name("HAS_MISSING_VALUE"),
+            Some(FilterType::HasMissingValue)
+        );
+        assert_eq!(
+            FilterType::from_name("DOES_NOT_HAVE_MISSING_VALUE"),
+            Some(FilterType::DoesNotHaveMissingValue)
+        );
+    }
+
+    #[test]
+    fn from_name_returns_none_for_unknown() {
+        assert!(FilterType::from_name("NOPE").is_none());
+        assert!(FilterType::from_name("").is_none());
+        assert!(FilterType::from_name("equal").is_none()); // case-sensitive
+    }
+
+    #[test]
+    fn programmatic_name_matches_java_canonical_names() {
+        // Spot-check against Java Filter.Operator programmaticName values.
+        assert_eq!(FilterType::Equal.programmatic_name(), "EQUAL");
+        assert_eq!(FilterType::NotEqual.programmatic_name(), "NOT_EQUAL");
+        assert_eq!(
+            FilterType::NotEqualOrNull.programmatic_name(),
+            "NOT_EQUAL_OR_MISSING"
+        );
+        assert_eq!(FilterType::GreaterThan.programmatic_name(), "GREATER_THAN");
+        assert_eq!(FilterType::IsBlank.programmatic_name(), "MISSING");
+        assert_eq!(FilterType::IsNotBlank.programmatic_name(), "NOT_MISSING");
+        assert_eq!(
+            FilterType::HasMissingValue.programmatic_name(),
+            "MV_INDICATOR"
+        );
+        assert_eq!(
+            FilterType::DoesNotHaveMissingValue.programmatic_name(),
+            "NO_MV_INDICATOR"
+        );
+        assert_eq!(
+            FilterType::ArrayIsEmpty.programmatic_name(),
+            "ARRAY_ISEMPTY"
+        );
+        assert_eq!(
+            FilterType::ArrayIsNotEmpty.programmatic_name(),
+            "ARRAY_ISNOTEMPTY"
+        );
+        assert_eq!(FilterType::Where.programmatic_name(), "WHERE");
+    }
+
+    // ── description tests ───────────────────────────────────────────
+
+    #[test]
+    fn description_single_filter() {
+        let filters = vec![Filter::equal("Name", "Alice")];
+        assert_eq!(description(&filters), "Equals Alice");
+    }
+
+    #[test]
+    fn description_multiple_filters_joined_with_and() {
+        let filters = vec![
+            Filter::new(
+                "Age",
+                FilterType::GreaterThan,
+                FilterValue::Single("10".into()),
+            ),
+            Filter::new(
+                "Age",
+                FilterType::LessThan,
+                FilterValue::Single("100".into()),
+            ),
+        ];
+        assert_eq!(
+            description(&filters),
+            "Is Greater Than 10 AND Is Less Than 100"
+        );
+    }
+
+    #[test]
+    fn description_no_value_filter_omits_trailing_space() {
+        let filters = vec![Filter::new("Notes", FilterType::IsBlank, FilterValue::None)];
+        assert_eq!(description(&filters), "Is Blank");
+    }
+
+    #[test]
+    fn description_empty_filters_returns_empty_string() {
+        assert_eq!(description(&[]), "");
+    }
+
+    // ── from_parameters tests ───────────────────────────────────────
+
+    #[test]
+    fn from_parameters_round_trips_with_encode_filters() {
+        let original = vec![
+            Filter::equal("Name", "Alice"),
+            Filter::new(
+                "Age",
+                FilterType::GreaterThan,
+                FilterValue::Single("21".into()),
+            ),
+        ];
+        let params = encode_filters(&original, "query");
+        let recovered = from_parameters(
+            params.iter().map(|(k, v)| (k.as_str(), v.as_str())),
+            "query",
+        );
+        assert_eq!(recovered.len(), 2);
+        assert_eq!(recovered[0].column_name(), "Name");
+        assert_eq!(recovered[0].filter_type(), FilterType::Equal);
+        assert_eq!(recovered[0].url_param_value(), "Alice");
+        assert_eq!(recovered[1].column_name(), "Age");
+        assert_eq!(recovered[1].filter_type(), FilterType::GreaterThan);
+        assert_eq!(recovered[1].url_param_value(), "21");
+    }
+
+    #[test]
+    fn from_parameters_skips_unknown_suffixes() {
+        let params = [
+            ("query.Name~eq", "Alice"),
+            ("query.Col~unknownsuffix", "val"),
+        ];
+        let filters = from_parameters(params, "query");
+        assert_eq!(filters.len(), 1);
+        assert_eq!(filters[0].column_name(), "Name");
+    }
+
+    #[test]
+    fn from_parameters_skips_wrong_data_region() {
+        let params = [("query.Name~eq", "Alice"), ("other.Name~eq", "Bob")];
+        let filters = from_parameters(params, "query");
+        assert_eq!(filters.len(), 1);
+        assert_eq!(filters[0].url_param_value(), "Alice");
+    }
+
+    #[test]
+    fn from_parameters_skips_params_without_tilde() {
+        let params = [("query.Name~eq", "Alice"), ("query.sort", "+Name")];
+        let filters = from_parameters(params, "query");
+        assert_eq!(filters.len(), 1);
+    }
+
+    #[test]
+    fn from_parameters_handles_multi_valued_in_filter() {
+        let params = [("query.Status~in", "Active;Pending;Closed")];
+        let filters = from_parameters(params, "query");
+        assert_eq!(filters.len(), 1);
+        assert_eq!(filters[0].filter_type(), FilterType::In);
+        assert_eq!(filters[0].url_param_value(), "Active;Pending;Closed");
+    }
+
+    #[test]
+    fn from_parameters_handles_json_encoded_multi_value() {
+        let params = [(r"query.Tags~in", r#"{json:["a;b","c"]}"#)];
+        let filters = from_parameters(params, "query");
+        assert_eq!(filters.len(), 1);
+        // The json-encoded value should round-trip back to json encoding
+        // since the values contain the separator.
+        let value = filters[0].url_param_value();
+        assert!(
+            value.starts_with("{json:"),
+            "should re-encode as json, got: {value}"
+        );
+    }
+
+    #[test]
+    fn from_parameters_handles_no_value_filter() {
+        let params = [("query.Notes~isblank", "")];
+        let filters = from_parameters(params, "query");
+        assert_eq!(filters.len(), 1);
+        assert_eq!(filters[0].filter_type(), FilterType::IsBlank);
+        assert_eq!(filters[0].url_param_value(), "");
+    }
+
+    #[test]
+    fn from_parameters_handles_between_filter() {
+        let params = [("query.Age~between", "18,65")];
+        let filters = from_parameters(params, "query");
+        assert_eq!(filters.len(), 1);
+        assert_eq!(filters[0].filter_type(), FilterType::Between);
+        assert_eq!(filters[0].url_param_value(), "18,65");
+    }
+
+    #[test]
+    fn from_parameters_handles_table_wise_q_filter() {
+        let params = [("query.*~q", "search term")];
+        let filters = from_parameters(params, "query");
+        assert_eq!(filters.len(), 1);
+        assert_eq!(filters[0].filter_type(), FilterType::Q);
+        assert_eq!(filters[0].column_name(), "*");
+        assert_eq!(filters[0].url_param_value(), "search term");
+    }
+
+    #[test]
+    fn from_parameters_empty_input_returns_empty() {
+        let filters = from_parameters(std::iter::empty::<(&str, &str)>(), "query");
+        assert!(filters.is_empty());
+    }
+
+    #[test]
+    fn filter_type_accessor_returns_correct_op() {
+        let f = Filter::equal("Name", "Alice");
+        assert_eq!(f.filter_type(), FilterType::Equal);
+
+        let f = Filter::new("Col", FilterType::Between, FilterValue::None);
+        assert_eq!(f.filter_type(), FilterType::Between);
     }
 }
