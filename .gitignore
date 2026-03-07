@@ -10,7 +10,9 @@
 !/justfile
 !/AGENTS.md
 !/opencode.json
+!/cliff.toml
 !/README.md
+!/CHANGELOG.md
 !/LICENSE-MIT
 !/LICENSE-APACHE
 

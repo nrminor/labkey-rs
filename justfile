@@ -90,6 +90,16 @@ status:
 log:
     jj log
 
+# === Changelog ===
+
+# Generate changelog from commit history (requires git-cliff)
+changelog:
+    git cliff -o CHANGELOG.md
+
+# Preview unreleased changelog entries
+changelog-preview:
+    git cliff --unreleased
+
 # === Utility ===
 
 # Clean build artifacts

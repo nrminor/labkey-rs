@@ -1,0 +1,72 @@
+# Changelog
+
+## Unreleased
+
+
+- Add Agent Skills SKILL.md and stop recommending hardcoded credentials
+- Flesh out module-level doc comments across all 20 one-liner modules
+- Add README with include_str! embedding and clean up doc comment backticks
+- Detect 200-with-embedded-exception responses and add optional CSRF token support
+- Add Guest credential, .netrc credential support, and list creation shorthand fields
+- Unify sort representations into dedicated sort module
+- Add filter-type-to-column-type mapping functions
+- Add filter utility functions: display_text, from_name, from_parameters, description
+- Add get_assay_batch, save_assay_batch, and save_assay_runs endpoints
+- Add missing schema field to QueryLookup for upstream JS parity
+- US-043: Post-ralph-loop verification pass over R1-R8 changes
+- US-042: Add targeted test coverage for assay, filter, message, storage, visualization, and pipeline modules
+- US-041: Verify integration test coverage is already complete for M15 and M16
+- US-040: Add WAF encoding verification and ApiVersionException distinction
+- US-039: Widen VisualizationResponse with 13 new typed fields
+- US-038: Widen experiment and assay response types with new fields
+- US-037: Add security permission/role constants and widen ContainerHierarchy and ModuleProperty
+- US-036: Widen query response types with lookup metadata, is* aliases, POST select-distinct, import metadata, and QueryLookup fields
+- US-035: Fix domain propertyURIs wire key and add includeNamePreview field
+- new tasks for the prd to bang out a series of corrections and improvements that can safely be handled in a ralph wiggum loop
+- temporarily switching build agent to opus now that I've mostly used up codex for the week
+- Add Where filter, filter merge helper, query details option, and remove library panic paths
+- Widen security, domain, and policy types for upstream parity; add container integration tests
+- Fix serde key mismatches in Group, RolePermission, and PolicyAssignment, plus wire compat fixes for CreateContainer, SaveBatch, and ListKeyType
+- Fix execute_sql, truncate_table, import_data, who_am_i, get_assay_run, pipeline, and select_rows wire compat issues
+- Add dataRegionName, showRows, and method to SelectRowsOptions
+- Fix DI wire format, SecurableResource field names, and list domain design name precedence
+- Fix assay get_assays body shape, import_run JSON+file mode, and property bracket key quoting
+- US-034: Enhance client configuration for UA, proxy, and cert handling
+- US-033: Audit full API parity and policy conformance
+- US-032: Add list convenience API and data-integration endpoints
+- US-031: Implement visualization module endpoints and models
+- US-030: Implement complete specimen module API surface
+- US-029: Add message, storage, and participant-group modules
+- US-028: Implement report module with session and execute APIs
+- US-027: Implement pipeline module endpoints
+- US-026: Audit experiment and assay parity against upstream clients
+- US-025: Implement assay import_run multipart API
+- US-024: Add assay Java protocol and run endpoints
+- US-023: Implement assay JS endpoint set
+- US-022: Implement experiment batch and run operations
+- US-021: Add experiment shared types and lineage endpoints
+- US-020: Implement domain module types and endpoints
+- US-019: Audit security parity against upstream clients
+- US-018: Implement security session and impersonation endpoints
+- US-017: Implement security permission and policy endpoints
+- US-016: Implement security user and group endpoints
+- US-015: Implement security container endpoints batch 2
+- US-014: Implement security container endpoints batch 1
+- US-013: Scaffold security module and shared security types
+- US-012: Audit query parity and align selectDistinct ignoreFilter
+- US-011: Implement query get_data endpoint
+- US-010: Implement query import_data multipart endpoint
+- US-009: Implement query misc endpoints and SQL literal utilities
+- US-008: Implement query view management endpoints
+- US-007: Implement query schema and query listing endpoints
+- US-006: Implement query select-distinct and details read endpoints
+- US-005: Implement query move_rows and save_rows endpoints
+- US-004: Implement core query mutation endpoints
+- US-003: Add integration test harness with mock server coverage
+- US-002: Add request options and multipart client plumbing
+- US-001: Add semver guardrails and shared audit behavior type
+- final agent setup in preparation for a ralph loop, including an exceptionally detailed markdown plan and PRD
+- select_rows, execute_sql, and response types
+- Filter system for LabKey query parameters
+- Error types, client struct, and URL construction
+- project setup with some initial fodder for agents
