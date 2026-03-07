@@ -10,7 +10,7 @@ use crate::{
     common::opt,
     domain::DomainDesign,
     error::LabkeyError,
-    experiment::Run,
+    experiment::{Run, RunGroup},
     filter::{Filter, encode_filters},
 };
 
@@ -462,6 +462,83 @@ pub struct ImportRunResponse {
     pub assay_id: Option<i64>,
 }
 
+/// An assay batch, which groups related runs under a single experiment run
+/// group. This is a type alias for [`RunGroup`] since the wire format is
+/// identical — `RunGroup` already contains `ExpObject` fields plus
+/// `runs: Vec<Run>`.
+pub type Batch = RunGroup;
+
+/// Identifies an assay for [`LabkeyClient::save_assay_batch`].
+///
+/// The server accepts either an integer assay ID or a protocol name string,
+/// but not both. This enum makes the mutual exclusivity explicit.
+#[derive(Debug, Clone)]
+pub enum BatchIdentifier {
+    /// Identify the assay by its numeric ID.
+    ByAssayId(i64),
+    /// Identify the assay by its protocol name. This mode supports
+    /// non-assay-backed runs (e.g., `"Sample Derivation Protocol"`).
+    ByProtocolName(String),
+}
+
+/// Options for [`LabkeyClient::get_assay_batch`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct GetAssayBatchOptions {
+    /// Protocol name of the assay design.
+    pub protocol_name: String,
+    /// Server-assigned batch ID to load.
+    pub batch_id: i64,
+    /// Override the client's default container path for this request.
+    pub container_path: Option<String>,
+}
+
+/// Options for [`LabkeyClient::save_assay_batch`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct SaveAssayBatchOptions {
+    /// Assay identifier — by numeric ID or protocol name.
+    pub identifier: BatchIdentifier,
+    /// The batch payload to save. If run/batch IDs are absent the server
+    /// inserts new records; if present it updates existing ones.
+    pub batch: Batch,
+    /// Override the client's default container path for this request.
+    pub container_path: Option<String>,
+}
+
+/// Response from [`LabkeyClient::save_assay_batch`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct SaveAssayBatchResponse {
+    /// The saved batch, including any server-assigned IDs.
+    pub batch: Batch,
+    /// The assay ID associated with the saved batch.
+    #[serde(default)]
+    pub assay_id: Option<i64>,
+}
+
+/// Options for [`LabkeyClient::save_assay_runs`].
+#[derive(Debug, Clone, bon::Builder)]
+#[non_exhaustive]
+pub struct SaveAssayRunsOptions {
+    /// Protocol name of the assay design.
+    pub protocol_name: String,
+    /// The runs to save. If run IDs are absent the server inserts new
+    /// records; if present it updates existing ones.
+    pub runs: Vec<Run>,
+    /// Override the client's default container path for this request.
+    pub container_path: Option<String>,
+}
+
+/// Response from [`LabkeyClient::save_assay_runs`].
+#[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
+pub struct SaveAssayRunsResponse {
+    /// The saved runs, including any server-assigned IDs.
+    pub runs: Vec<Run>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct GetAssaysResponse {
     definitions: Vec<AssayDesign>,
@@ -501,6 +578,35 @@ struct GetAssayRunBody {
 #[derive(Deserialize)]
 struct GetAssayRunEnvelope {
     run: Run,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GetAssayBatchBody {
+    protocol_name: String,
+    batch_id: i64,
+}
+
+#[derive(Deserialize)]
+struct GetAssayBatchEnvelope {
+    batch: Batch,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveAssayBatchBody {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assay_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    protocol_name: Option<String>,
+    batch: Batch,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveAssayRunsBody {
+    protocol_name: String,
+    runs: Vec<Run>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -915,6 +1021,161 @@ impl LabkeyClient {
         self.post_multipart(url, form, &RequestOptions::default())
             .await
     }
+
+    /// Load an assay batch by protocol name and batch ID.
+    ///
+    /// Sends a POST request to `assay-getAssayBatch.api` and extracts the
+    /// `batch` object from the response envelope.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the protocol name is blank, the HTTP
+    /// request fails, or the response cannot be deserialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// let batch = client
+    ///     .get_assay_batch(
+    ///         labkey_rs::assay::GetAssayBatchOptions::builder()
+    ///             .protocol_name("General".to_string())
+    ///             .batch_id(42)
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("{:?}", batch.exp_object.name);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_assay_batch(
+        &self,
+        options: GetAssayBatchOptions,
+    ) -> Result<Batch, LabkeyError> {
+        validate_get_assay_batch_options(&options)?;
+        let url = self.build_url("assay", "getAssayBatch", options.container_path.as_deref());
+        let body = GetAssayBatchBody {
+            protocol_name: options.protocol_name,
+            batch_id: options.batch_id,
+        };
+        let envelope: GetAssayBatchEnvelope = self.post(url, &body).await?;
+        Ok(envelope.batch)
+    }
+
+    /// Save (insert or update) an assay batch.
+    ///
+    /// Sends a POST request to `assay-saveAssayBatch.api`. If the batch and
+    /// its runs have no server-assigned IDs, the server inserts new records.
+    /// If IDs are present, existing records are updated.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the identifier is invalid (blank protocol
+    /// name or non-positive assay ID), the HTTP request fails, or the
+    /// response cannot be deserialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::assay::{Batch, BatchIdentifier, SaveAssayBatchOptions};
+    ///
+    /// let batch: Batch = serde_json::from_value(serde_json::json!({}))?;
+    /// let response = client
+    ///     .save_assay_batch(
+    ///         SaveAssayBatchOptions::builder()
+    ///             .identifier(BatchIdentifier::ByAssayId(7))
+    ///             .batch(batch)
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("saved batch for assay {:?}", response.assay_id);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn save_assay_batch(
+        &self,
+        options: SaveAssayBatchOptions,
+    ) -> Result<SaveAssayBatchResponse, LabkeyError> {
+        validate_save_assay_batch_options(&options)?;
+        let url = self.build_url("assay", "saveAssayBatch", options.container_path.as_deref());
+        let (assay_id, protocol_name) = match options.identifier {
+            BatchIdentifier::ByAssayId(id) => (Some(id), None),
+            BatchIdentifier::ByProtocolName(name) => (None, Some(name)),
+        };
+        let body = SaveAssayBatchBody {
+            assay_id,
+            protocol_name,
+            batch: options.batch,
+        };
+        self.post(url, &body).await
+    }
+
+    /// Save (insert or update) assay runs without a batch wrapper.
+    ///
+    /// Sends a POST request to `assay-saveAssayRuns.api`. Unlike
+    /// [`save_assay_batch`](Self::save_assay_batch), this endpoint accepts
+    /// runs directly without grouping them into a batch.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError`] if the protocol name is blank, the runs list
+    /// is empty, the HTTP request fails, or the response cannot be
+    /// deserialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::assay::SaveAssayRunsOptions;
+    /// use labkey_rs::experiment::Run;
+    ///
+    /// let run: Run = serde_json::from_value(serde_json::json!({}))?;
+    /// let response = client
+    ///     .save_assay_runs(
+    ///         SaveAssayRunsOptions::builder()
+    ///             .protocol_name("General".to_string())
+    ///             .runs(vec![run])
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    ///
+    /// println!("saved {} runs", response.runs.len());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn save_assay_runs(
+        &self,
+        options: SaveAssayRunsOptions,
+    ) -> Result<SaveAssayRunsResponse, LabkeyError> {
+        validate_save_assay_runs_options(&options)?;
+        let url = self.build_url("assay", "saveAssayRuns", options.container_path.as_deref());
+        let body = SaveAssayRunsBody {
+            protocol_name: options.protocol_name,
+            runs: options.runs,
+        };
+        self.post(url, &body).await
+    }
 }
 
 fn build_get_assays_body(options: &GetAssaysOptions) -> GetAssaysBody {
@@ -978,6 +1239,44 @@ fn validate_get_assay_run_options(options: &GetAssayRunOptions) -> Result<(), La
     if options.lsid.trim().is_empty() {
         return Err(LabkeyError::InvalidInput(
             "get_assay_run requires a non-empty lsid".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_get_assay_batch_options(options: &GetAssayBatchOptions) -> Result<(), LabkeyError> {
+    if options.protocol_name.trim().is_empty() {
+        return Err(LabkeyError::InvalidInput(
+            "get_assay_batch requires a non-empty protocol_name".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_save_assay_batch_options(options: &SaveAssayBatchOptions) -> Result<(), LabkeyError> {
+    match &options.identifier {
+        BatchIdentifier::ByAssayId(id) if *id <= 0 => Err(LabkeyError::InvalidInput(
+            "save_assay_batch requires a positive assay_id in ByAssayId mode".to_string(),
+        )),
+        BatchIdentifier::ByProtocolName(name) if name.trim().is_empty() => {
+            Err(LabkeyError::InvalidInput(
+                "save_assay_batch requires a non-empty protocol_name in ByProtocolName mode"
+                    .to_string(),
+            ))
+        }
+        _ => Ok(()),
+    }
+}
+
+fn validate_save_assay_runs_options(options: &SaveAssayRunsOptions) -> Result<(), LabkeyError> {
+    if options.protocol_name.trim().is_empty() {
+        return Err(LabkeyError::InvalidInput(
+            "save_assay_runs requires a non-empty protocol_name".to_string(),
+        ));
+    }
+    if options.runs.is_empty() {
+        return Err(LabkeyError::InvalidInput(
+            "save_assay_runs requires at least one run".to_string(),
         ));
     }
     Ok(())
@@ -2432,5 +2731,205 @@ mod tests {
             "only the single objectIds param should be emitted when all optionals are None"
         );
         assert_eq!(params[0], ("objectIds".into(), "run-a".into()));
+    }
+
+    #[test]
+    fn batch_type_alias_is_run_group() {
+        // Batch is a type alias for RunGroup, so constructing via
+        // deserialization should produce the same type.
+        let json = serde_json::json!({
+            "name": "Test Batch",
+            "runs": [
+                {"name": "Run 1"},
+                {"name": "Run 2"}
+            ]
+        });
+        let batch: Batch = serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(batch.exp_object.name.as_deref(), Some("Test Batch"));
+        assert_eq!(batch.runs.len(), 2);
+        assert_eq!(batch.runs[0].exp_object.name.as_deref(), Some("Run 1"));
+    }
+
+    #[test]
+    fn get_assay_batch_body_serializes_expected_keys() {
+        let body = GetAssayBatchBody {
+            protocol_name: "General".to_string(),
+            batch_id: 42,
+        };
+        let json = serde_json::to_value(&body).expect("should serialize");
+        assert_eq!(json["protocolName"], "General");
+        assert_eq!(json["batchId"], 42);
+    }
+
+    #[test]
+    fn save_assay_batch_body_serializes_assay_id_mode() {
+        let batch: Batch =
+            serde_json::from_value(serde_json::json!({})).expect("empty JSON should deserialize");
+        let body = SaveAssayBatchBody {
+            assay_id: Some(7),
+            protocol_name: None,
+            batch,
+        };
+        let json = serde_json::to_value(&body).expect("should serialize");
+        assert_eq!(json["assayId"], 7);
+        assert!(json.get("protocolName").is_none());
+        assert!(json.get("batch").is_some());
+    }
+
+    #[test]
+    fn save_assay_batch_body_serializes_protocol_name_mode() {
+        let batch: Batch =
+            serde_json::from_value(serde_json::json!({})).expect("empty JSON should deserialize");
+        let body = SaveAssayBatchBody {
+            assay_id: None,
+            protocol_name: Some("Sample Derivation Protocol".to_string()),
+            batch,
+        };
+        let json = serde_json::to_value(&body).expect("should serialize");
+        assert!(json.get("assayId").is_none());
+        assert_eq!(json["protocolName"], "Sample Derivation Protocol");
+        assert!(json.get("batch").is_some());
+    }
+
+    #[test]
+    fn save_assay_runs_body_serializes_protocol_and_runs() {
+        let run: Run =
+            serde_json::from_value(serde_json::json!({"name": "R1"})).expect("should deserialize");
+        let body = SaveAssayRunsBody {
+            protocol_name: "General".to_string(),
+            runs: vec![run],
+        };
+        let json = serde_json::to_value(&body).expect("should serialize");
+        assert_eq!(json["protocolName"], "General");
+        let runs = json["runs"].as_array().expect("runs should be an array");
+        assert_eq!(runs.len(), 1);
+    }
+
+    #[test]
+    fn save_assay_batch_response_deserializes_envelope() {
+        let json = serde_json::json!({
+            "assayId": 7,
+            "batch": {
+                "name": "Batch 1",
+                "runs": [{"name": "Run 1"}]
+            }
+        });
+        let response: SaveAssayBatchResponse =
+            serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(response.assay_id, Some(7));
+        assert_eq!(response.batch.exp_object.name.as_deref(), Some("Batch 1"));
+        assert_eq!(response.batch.runs.len(), 1);
+    }
+
+    #[test]
+    fn save_assay_runs_response_deserializes_runs_array() {
+        let json = serde_json::json!({
+            "runs": [
+                {"name": "Run A"},
+                {"name": "Run B"}
+            ]
+        });
+        let response: SaveAssayRunsResponse =
+            serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(response.runs.len(), 2);
+        assert_eq!(response.runs[0].exp_object.name.as_deref(), Some("Run A"));
+        assert_eq!(response.runs[1].exp_object.name.as_deref(), Some("Run B"));
+    }
+
+    #[test]
+    fn get_assay_batch_envelope_extracts_batch() {
+        let json = serde_json::json!({
+            "batch": {
+                "name": "Loaded Batch",
+                "runs": []
+            }
+        });
+        let envelope: GetAssayBatchEnvelope =
+            serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(
+            envelope.batch.exp_object.name.as_deref(),
+            Some("Loaded Batch")
+        );
+        assert!(envelope.batch.runs.is_empty());
+    }
+
+    #[test]
+    fn validate_get_assay_batch_rejects_blank_protocol_name() {
+        let err = validate_get_assay_batch_options(&GetAssayBatchOptions {
+            protocol_name: "  ".to_string(),
+            batch_id: 1,
+            container_path: None,
+        })
+        .expect_err("should reject blank protocol name");
+        assert!(matches!(err, LabkeyError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn validate_save_assay_batch_rejects_non_positive_assay_id() {
+        let batch: Batch =
+            serde_json::from_value(serde_json::json!({})).expect("empty JSON should deserialize");
+        let err = validate_save_assay_batch_options(&SaveAssayBatchOptions {
+            identifier: BatchIdentifier::ByAssayId(0),
+            batch,
+            container_path: None,
+        })
+        .expect_err("should reject non-positive assay_id");
+        assert!(matches!(err, LabkeyError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn validate_save_assay_batch_rejects_blank_protocol_name() {
+        let batch: Batch =
+            serde_json::from_value(serde_json::json!({})).expect("empty JSON should deserialize");
+        let err = validate_save_assay_batch_options(&SaveAssayBatchOptions {
+            identifier: BatchIdentifier::ByProtocolName(String::new()),
+            batch,
+            container_path: None,
+        })
+        .expect_err("should reject blank protocol name");
+        assert!(matches!(err, LabkeyError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn validate_save_assay_batch_accepts_valid_inputs() {
+        let batch: Batch =
+            serde_json::from_value(serde_json::json!({})).expect("empty JSON should deserialize");
+        validate_save_assay_batch_options(&SaveAssayBatchOptions {
+            identifier: BatchIdentifier::ByAssayId(7),
+            batch: batch.clone(),
+            container_path: None,
+        })
+        .expect("positive assay_id should be valid");
+
+        validate_save_assay_batch_options(&SaveAssayBatchOptions {
+            identifier: BatchIdentifier::ByProtocolName("General".to_string()),
+            batch,
+            container_path: None,
+        })
+        .expect("non-empty protocol name should be valid");
+    }
+
+    #[test]
+    fn validate_save_assay_runs_rejects_blank_protocol_name() {
+        let run: Run =
+            serde_json::from_value(serde_json::json!({})).expect("empty JSON should deserialize");
+        let err = validate_save_assay_runs_options(&SaveAssayRunsOptions {
+            protocol_name: "  ".to_string(),
+            runs: vec![run],
+            container_path: None,
+        })
+        .expect_err("should reject blank protocol name");
+        assert!(matches!(err, LabkeyError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn validate_save_assay_runs_rejects_empty_runs() {
+        let err = validate_save_assay_runs_options(&SaveAssayRunsOptions {
+            protocol_name: "General".to_string(),
+            runs: vec![],
+            container_path: None,
+        })
+        .expect_err("should reject empty runs");
+        assert!(matches!(err, LabkeyError::InvalidInput(_)));
     }
 }
