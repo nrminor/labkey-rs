@@ -4,7 +4,7 @@ use std::{collections::HashMap, time::Duration};
 
 use crate::{
     client::LabkeyClient,
-    domain::{CreateDomainOptions, DomainDesign, DomainKind},
+    domain::{CreateDomainOptions, DomainDesign, DomainField, DomainIndex, DomainKind},
     error::LabkeyError,
 };
 
@@ -47,13 +47,30 @@ impl ListKeyType {
 }
 
 /// Options for [`LabkeyClient::create_list`].
+///
+/// For simple lists, use the shorthand `description`, `fields`, and `indices`
+/// fields directly — they are folded into a [`DomainDesign`] automatically.
+/// For full control, provide an explicit `domain_design` instead. The two
+/// approaches are mutually exclusive: providing both `domain_design` and any
+/// shorthand field is rejected at validation time.
 #[derive(Debug, Clone, bon::Builder)]
 #[non_exhaustive]
 pub struct CreateListOptions {
     /// Optional container override for request routing.
     pub container_path: Option<String>,
-    /// Optional base domain design to extend.
+    /// Optional base domain design for full control over the domain
+    /// configuration. Mutually exclusive with the `description`, `fields`,
+    /// and `indices` shorthand fields.
     pub domain_design: Option<DomainDesign>,
+    /// Shorthand: list description, folded into the domain design when no
+    /// explicit `domain_design` is provided.
+    pub description: Option<String>,
+    /// Shorthand: field definitions, folded into the domain design when no
+    /// explicit `domain_design` is provided.
+    pub fields: Option<Vec<DomainField>>,
+    /// Shorthand: index definitions, folded into the domain design when no
+    /// explicit `domain_design` is provided.
+    pub indices: Option<Vec<DomainIndex>>,
     /// Name for the new list domain.
     pub name: String,
     /// Key field name (`options.keyName` in the delegated domain payload).
@@ -62,20 +79,6 @@ pub struct CreateListOptions {
     pub key_type: ListKeyType,
     /// Optional request timeout override.
     pub timeout: Option<Duration>,
-}
-
-fn default_domain_design(name: String) -> DomainDesign {
-    DomainDesign {
-        domain_id: None,
-        domain_uri: None,
-        name: Some(name),
-        description: None,
-        schema_name: None,
-        query_name: None,
-        fields: None,
-        indices: None,
-        extra: HashMap::new(),
-    }
 }
 
 fn create_list_options_json(key_name: String, key_type: ListKeyType) -> serde_json::Value {
@@ -91,12 +94,24 @@ fn create_list_options_json(key_name: String, key_type: ListKeyType) -> serde_js
 }
 
 fn map_create_list_to_create_domain_options(options: CreateListOptions) -> CreateDomainOptions {
-    // Match JS client precedence (List.ts:99-102): if a domainDesign is
-    // provided, use it as-is; only fall back to options.name when no
-    // domainDesign was given.
-    let domain_design = options
-        .domain_design
-        .unwrap_or_else(|| default_domain_design(options.name));
+    let domain_design = if let Some(design) = options.domain_design {
+        // Explicit domain design takes full control — shorthands were already
+        // rejected by validation if present alongside it.
+        design
+    } else {
+        // Build a domain design from the name and any shorthand fields.
+        DomainDesign {
+            domain_id: None,
+            domain_uri: None,
+            name: Some(options.name),
+            description: options.description,
+            schema_name: None,
+            query_name: None,
+            fields: options.fields,
+            indices: options.indices,
+            extra: HashMap::new(),
+        }
+    };
 
     CreateDomainOptions::builder()
         .maybe_container_path(options.container_path)
@@ -118,6 +133,15 @@ fn validate_create_list_options(options: &CreateListOptions) -> Result<(), Labke
             "create_list requires non-empty key_name".to_string(),
         ));
     }
+    let has_shorthand =
+        options.description.is_some() || options.fields.is_some() || options.indices.is_some();
+    if options.domain_design.is_some() && has_shorthand {
+        return Err(LabkeyError::InvalidInput(
+            "create_list does not allow shorthand fields (description, fields, indices) \
+             when an explicit domain_design is provided — use one approach or the other"
+                .to_string(),
+        ));
+    }
     Ok(())
 }
 
@@ -135,7 +159,9 @@ impl LabkeyClient {
     /// Returns [`LabkeyError`] if list inputs are invalid or the delegated
     /// domain-creation request fails.
     ///
-    /// # Example
+    /// # Examples
+    ///
+    /// Minimal list with no fields (server creates the key column):
     ///
     /// ```no_run
     /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
@@ -153,6 +179,43 @@ impl LabkeyClient {
     ///             .name("StudyList".to_string())
     ///             .key_name("RowId".to_string())
     ///             .key_type(ListKeyType::IntList)
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// Using shorthand fields to define columns inline:
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::list::{CreateListOptions, ListKeyType};
+    ///
+    /// // Fields can be provided as raw JSON when you don't need the full
+    /// // DomainField struct — the server fills in defaults for omitted
+    /// // properties.
+    /// let fields: Vec<labkey_rs::domain::DomainField> = serde_json::from_value(
+    ///     serde_json::json!([
+    ///         { "name": "name", "rangeURI": "string" },
+    ///         { "name": "slogan", "rangeURI": "multiLine" },
+    ///     ])
+    /// ).unwrap();
+    ///
+    /// let _ = client
+    ///     .create_list(
+    ///         CreateListOptions::builder()
+    ///             .name("Teams".to_string())
+    ///             .key_name("rowId".to_string())
+    ///             .key_type(ListKeyType::AutoIncrementInteger)
+    ///             .description("Teams in the league".to_string())
+    ///             .fields(fields)
     ///             .build(),
     ///     )
     ///     .await?;
@@ -377,6 +440,151 @@ mod tests {
             Some(serde_json::json!({
                 "keyName": "RowId"
             }))
+        );
+    }
+
+    #[test]
+    fn shorthand_description_folds_into_domain_design() {
+        let mapped = map_create_list_to_create_domain_options(
+            CreateListOptions::builder()
+                .name("Teams".to_string())
+                .key_name("RowId".to_string())
+                .key_type(ListKeyType::IntList)
+                .description("Teams in the league".to_string())
+                .build(),
+        );
+
+        let design = mapped.domain_design.expect("should have a domain design");
+        assert_eq!(design.name.as_deref(), Some("Teams"));
+        assert_eq!(design.description.as_deref(), Some("Teams in the league"));
+    }
+
+    #[test]
+    fn shorthand_fields_fold_into_domain_design() {
+        let fields: Vec<crate::domain::DomainField> = serde_json::from_value(serde_json::json!([
+            { "name": "name", "rangeURI": "string" },
+            { "name": "slogan", "rangeURI": "multiLine" },
+        ]))
+        .expect("test field JSON should deserialize");
+
+        let mapped = map_create_list_to_create_domain_options(
+            CreateListOptions::builder()
+                .name("Teams".to_string())
+                .key_name("RowId".to_string())
+                .key_type(ListKeyType::IntList)
+                .fields(fields)
+                .build(),
+        );
+
+        let design = mapped.domain_design.expect("should have a domain design");
+        let fields = design.fields.expect("domain design should have fields");
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].name.as_deref(), Some("name"));
+        assert_eq!(fields[1].name.as_deref(), Some("slogan"));
+    }
+
+    #[test]
+    fn shorthand_indices_fold_into_domain_design() {
+        let indices: Vec<crate::domain::DomainIndex> = serde_json::from_value(serde_json::json!([
+            { "columnNames": ["name"], "unique": true },
+        ]))
+        .expect("test index JSON should deserialize");
+
+        let mapped = map_create_list_to_create_domain_options(
+            CreateListOptions::builder()
+                .name("Teams".to_string())
+                .key_name("RowId".to_string())
+                .key_type(ListKeyType::IntList)
+                .indices(indices)
+                .build(),
+        );
+
+        let design = mapped.domain_design.expect("should have a domain design");
+        let indices = design.indices.expect("domain design should have indices");
+        assert_eq!(indices.len(), 1);
+    }
+
+    #[test]
+    fn validation_rejects_domain_design_with_shorthand_fields() {
+        let options = CreateListOptions::builder()
+            .name("Teams".to_string())
+            .key_name("RowId".to_string())
+            .key_type(ListKeyType::IntList)
+            .domain_design(DomainDesign {
+                domain_id: None,
+                domain_uri: None,
+                name: Some("Teams".to_string()),
+                description: None,
+                schema_name: None,
+                query_name: None,
+                fields: None,
+                indices: None,
+                extra: HashMap::new(),
+            })
+            .description("should conflict".to_string())
+            .build();
+
+        let result = validate_create_list_options(&options);
+        assert!(
+            matches!(&result, Err(LabkeyError::InvalidInput(msg)) if msg.contains("shorthand")),
+            "should reject domain_design + shorthand combination: {result:?}"
+        );
+    }
+
+    #[test]
+    fn validation_rejects_domain_design_with_shorthand_fields_via_fields() {
+        let fields: Vec<crate::domain::DomainField> = serde_json::from_value(serde_json::json!([
+            { "name": "x" },
+        ]))
+        .expect("test field JSON should deserialize");
+
+        let options = CreateListOptions::builder()
+            .name("Teams".to_string())
+            .key_name("RowId".to_string())
+            .key_type(ListKeyType::IntList)
+            .domain_design(DomainDesign {
+                domain_id: None,
+                domain_uri: None,
+                name: Some("Teams".to_string()),
+                description: None,
+                schema_name: None,
+                query_name: None,
+                fields: None,
+                indices: None,
+                extra: HashMap::new(),
+            })
+            .fields(fields)
+            .build();
+
+        let result = validate_create_list_options(&options);
+        assert!(
+            matches!(&result, Err(LabkeyError::InvalidInput(msg)) if msg.contains("shorthand")),
+            "should reject domain_design + fields combination: {result:?}"
+        );
+    }
+
+    #[test]
+    fn validation_accepts_domain_design_without_shorthands() {
+        let options = CreateListOptions::builder()
+            .name("Teams".to_string())
+            .key_name("RowId".to_string())
+            .key_type(ListKeyType::IntList)
+            .domain_design(DomainDesign {
+                domain_id: None,
+                domain_uri: None,
+                name: Some("Teams".to_string()),
+                description: None,
+                schema_name: None,
+                query_name: None,
+                fields: None,
+                indices: None,
+                extra: HashMap::new(),
+            })
+            .build();
+
+        assert!(
+            validate_create_list_options(&options).is_ok(),
+            "domain_design alone should be valid"
         );
     }
 }

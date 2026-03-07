@@ -5,6 +5,7 @@
 //! default container path, and authentication credentials. Every API endpoint
 //! method is an async method on this struct.
 
+use std::io::BufRead;
 use std::time::Duration;
 
 use reqwest::StatusCode;
@@ -28,6 +29,106 @@ pub enum Credential {
         /// The API key string.
         String,
     ),
+    /// Anonymous access with no authentication credentials.
+    ///
+    /// Requests are sent without an `Authorization` header, so the server
+    /// grants only guest-level permissions. This matches Java's
+    /// `GuestCredentialsProvider`.
+    Guest,
+}
+
+impl Credential {
+    /// Read credentials for `host` from the user's `~/.netrc` file.
+    ///
+    /// Looks for `~/.netrc` first, then `~/_netrc` (the Windows convention),
+    /// matching Java's `NetrcCredentialsProvider` behavior. Returns
+    /// [`Credential::Basic`] with the `login` and `password` from the
+    /// matching `machine` entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError::InvalidInput`] if:
+    /// - The home directory cannot be determined
+    /// - Neither `~/.netrc` nor `~/_netrc` exists
+    /// - The file cannot be read or parsed
+    /// - No entry matches the given `host`
+    /// - The matching entry has no password
+    ///
+    /// If you want to fall back to guest access when no netrc entry is found,
+    /// catch the error and use [`Credential::Guest`] instead.
+    pub fn from_netrc(host: &str) -> Result<Self, LabkeyError> {
+        let home = home_dir().ok_or_else(|| {
+            LabkeyError::InvalidInput("cannot determine home directory for .netrc lookup".into())
+        })?;
+
+        let netrc_path = home.join(".netrc");
+        let alt_path = home.join("_netrc");
+
+        let path = if netrc_path.is_file() {
+            netrc_path
+        } else if alt_path.is_file() {
+            alt_path
+        } else {
+            return Err(LabkeyError::InvalidInput(format!(
+                "no .netrc or _netrc file found in {}",
+                home.display()
+            )));
+        };
+
+        let file = std::fs::File::open(&path).map_err(|e| {
+            LabkeyError::InvalidInput(format!("failed to open {}: {e}", path.display()))
+        })?;
+        let reader = std::io::BufReader::new(file);
+
+        Self::from_netrc_reader(reader, host)
+    }
+
+    /// Parse credentials for `host` from a netrc-formatted byte stream.
+    ///
+    /// This is the testable core of [`from_netrc`](Self::from_netrc),
+    /// separated so tests can supply in-memory content without touching the
+    /// filesystem.
+    fn from_netrc_reader(reader: impl BufRead, host: &str) -> Result<Self, LabkeyError> {
+        let netrc = netrc::Netrc::parse(reader)
+            .map_err(|e| LabkeyError::InvalidInput(format!("failed to parse netrc file: {e:?}")))?;
+
+        for (entry_host, machine) in &netrc.hosts {
+            if entry_host == host {
+                let password = machine.password.as_ref().ok_or_else(|| {
+                    LabkeyError::InvalidInput(format!(
+                        "netrc entry for {host} has no password field"
+                    ))
+                })?;
+                return Ok(Self::Basic {
+                    email: machine.login.clone(),
+                    password: password.clone(),
+                });
+            }
+        }
+
+        Err(LabkeyError::InvalidInput(format!(
+            "no netrc entry found for host \"{host}\""
+        )))
+    }
+}
+
+/// Resolve the user's home directory.
+///
+/// Uses `$HOME` on Unix and `%USERPROFILE%` on Windows, matching the
+/// conventional locations for `.netrc` / `_netrc` files.
+fn home_dir() -> Option<std::path::PathBuf> {
+    #[cfg(unix)]
+    {
+        std::env::var_os("HOME").map(std::path::PathBuf::from)
+    }
+    #[cfg(windows)]
+    {
+        std::env::var_os("USERPROFILE").map(std::path::PathBuf::from)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        None
+    }
 }
 
 /// Configuration for constructing a [`LabkeyClient`].
@@ -239,6 +340,7 @@ impl LabkeyClient {
         match &self.credential {
             Credential::Basic { email, password } => builder.basic_auth(email, Some(password)),
             Credential::ApiKey(key) => builder.basic_auth("apikey", Some(key)),
+            Credential::Guest => builder,
         }
     }
 
@@ -856,5 +958,114 @@ mod tests {
                 .and_then(|v| v.to_str().ok()),
             Some("application/json")
         );
+    }
+
+    #[test]
+    fn guest_credential_sends_no_authorization_header() {
+        let client = LabkeyClient::new(ClientConfig::new(
+            "https://labkey.example.com/labkey",
+            Credential::Guest,
+            "/MyProject",
+        ))
+        .expect("guest client config should be valid");
+
+        let url = client.build_url("query", "getQuery.api", None);
+        let request = client
+            .build_get_request(&client.http, url, &[], &RequestOptions::default())
+            .expect("should build request");
+
+        assert!(
+            request.headers().get("authorization").is_none(),
+            "Guest credential should not add an Authorization header"
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get("x-requested-with")
+                .and_then(|v| v.to_str().ok()),
+            Some("XMLHttpRequest"),
+            "Guest requests should still include the X-Requested-With header"
+        );
+    }
+
+    #[test]
+    fn from_netrc_reader_finds_matching_host() {
+        let netrc_content = b"machine labkey.example.com login user@example.com password s3cret\n";
+        let reader = std::io::Cursor::new(netrc_content);
+
+        let credential = Credential::from_netrc_reader(reader, "labkey.example.com")
+            .expect("should find matching host in netrc content");
+
+        match credential {
+            Credential::Basic { email, password } => {
+                assert_eq!(email, "user@example.com");
+                assert_eq!(password, "s3cret");
+            }
+            other => panic!("expected Credential::Basic, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn from_netrc_reader_returns_error_for_unknown_host() {
+        let netrc_content = b"machine other.example.com login user password pass\n";
+        let reader = std::io::Cursor::new(netrc_content);
+
+        let result = Credential::from_netrc_reader(reader, "labkey.example.com");
+        assert!(
+            result.is_err(),
+            "should fail when host is not in netrc content"
+        );
+
+        let err_msg = result
+            .expect_err("should fail when host is not in netrc content")
+            .to_string();
+        assert!(
+            err_msg.contains("labkey.example.com"),
+            "error should mention the host that was not found: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn from_netrc_reader_returns_error_for_missing_password() {
+        let netrc_content = b"machine labkey.example.com login user@example.com\n";
+        let reader = std::io::Cursor::new(netrc_content);
+
+        let result = Credential::from_netrc_reader(reader, "labkey.example.com");
+
+        let err_msg = result
+            .expect_err("should fail when netrc entry has no password")
+            .to_string();
+        assert!(
+            err_msg.contains("no password"),
+            "error should explain the password is missing: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn from_netrc_reader_selects_first_matching_host_from_multiple_entries() {
+        let netrc_content = b"\
+machine first.example.com login alice password pw1\n\
+machine labkey.example.com login bob@lab.org password labpass\n\
+machine third.example.com login carol password pw3\n";
+        let reader = std::io::Cursor::new(netrc_content);
+
+        let credential = Credential::from_netrc_reader(reader, "labkey.example.com")
+            .expect("should find labkey.example.com among multiple entries");
+
+        match credential {
+            Credential::Basic { email, password } => {
+                assert_eq!(email, "bob@lab.org");
+                assert_eq!(password, "labpass");
+            }
+            other => panic!("expected Credential::Basic, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn from_netrc_reader_returns_error_for_empty_content() {
+        let reader = std::io::Cursor::new(b"");
+
+        let result = Credential::from_netrc_reader(reader, "labkey.example.com");
+        assert!(result.is_err(), "should fail when netrc content is empty");
     }
 }
