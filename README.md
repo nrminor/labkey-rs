@@ -23,9 +23,11 @@ use labkey_rs::filter::{Filter, FilterType};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = std::env::var("LABKEY_API_KEY")?;
+
     let client = LabkeyClient::new(ClientConfig::new(
         "https://labkey.example.com/labkey",
-        Credential::ApiKey("your-api-key".into()),
+        Credential::ApiKey(api_key),
         "/MyProject",
     ))?;
 
@@ -33,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         SelectRowsOptions::builder()
             .schema_name("core")
             .query_name("Users")
-            .filters(vec![
+            .filter_array(vec![
                 Filter::new("Email", FilterType::Contains, "example.com"),
             ])
             .build(),
@@ -50,21 +52,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Authentication
 
-The client supports three credential types:
+The client supports four credential types:
 
 ```rust,no_run
 use labkey_rs::Credential;
 
-// API key (recommended for programmatic access)
-let cred = Credential::ApiKey("your-api-key".into());
+// API key from an environment variable (recommended)
+let cred = Credential::ApiKey(
+    std::env::var("LABKEY_API_KEY").expect("LABKEY_API_KEY must be set"),
+);
 
-// Basic auth
+// Basic auth (email + password — avoid hardcoding these)
 let cred = Credential::Basic {
     email: "user@example.com".into(),
     password: "secret".into(),
 };
 
-// Read credentials from ~/.netrc
+// Read credentials from a ~/.netrc file
 let cred = Credential::from_netrc("labkey.example.com")
     .expect("credentials found in .netrc");
 
@@ -72,7 +76,7 @@ let cred = Credential::from_netrc("labkey.example.com")
 let cred = Credential::Guest;
 ```
 
-API keys are the standard choice for scripts and automation. The `from_netrc` constructor reads `~/.netrc` (or `~/_netrc` on Windows), which is useful for keeping credentials out of source code. Guest access works only when the LabKey server permits anonymous reads.
+API keys are the standard LabKey authentication mechanism — just make sure the key comes from an environment variable, a secrets manager, or a credential file rather than being hardcoded in source. The `from_netrc` constructor reads `~/.netrc` (or `~/_netrc` on Windows), matching the Java client's `NetrcCredentialsProvider`, which is handy if you manage credentials for multiple servers. Guest access works only when the LabKey server permits anonymous reads.
 
 ## Modules
 

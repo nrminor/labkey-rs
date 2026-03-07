@@ -138,9 +138,10 @@ fn home_dir() -> Option<std::path::PathBuf> {
 /// ```no_run
 /// use labkey_rs::{ClientConfig, Credential, LabkeyClient};
 ///
+/// let api_key = std::env::var("LABKEY_API_KEY").expect("LABKEY_API_KEY must be set");
 /// let config = ClientConfig::new(
 ///     "https://labkey.example.com/labkey",
-///     Credential::ApiKey("my-api-key".into()),
+///     Credential::ApiKey(api_key),
 ///     "/MyProject/MyFolder",
 /// );
 /// let client = LabkeyClient::new(config).expect("valid configuration");

@@ -65,6 +65,11 @@
 !/tests/fixtures/get_schemas.json
 !/tests/fixtures/whoami.json
 
+# === Allowed: Agent Skills ===
+!/skills
+!/skills/labkey-rs
+!/skills/labkey-rs/SKILL.md
+
 # === Allowed: GitHub workflows ===
 !/.github
 !/.github/workflows
