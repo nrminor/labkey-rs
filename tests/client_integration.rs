@@ -25,13 +25,12 @@ use labkey_rs::pipeline::{
 };
 use labkey_rs::query::{
     CommandType, DataViewType, DeleteQueryViewOptions, DeleteRowsOptions, ExecuteSqlOptions,
-    GetDataAggregate, GetDataFilter, GetDataOptions, GetDataPivot, GetDataSort,
-    GetDataSortDirection, GetDataSource, GetDataTransform, GetDataViewsOptions, GetQueriesOptions,
-    GetQueryDetailsOptions, GetQueryViewsOptions, GetSchemasOptions, ImportDataOptions,
-    ImportDataSource, InsertOption, InsertRowsOptions, MoveRowsOptions, RequestMethod,
-    SaveQueryViewsOptions, SaveRowsCommand, SaveRowsOptions, SaveSessionViewOptions,
-    SelectDistinctOptions, SelectRowsOptions, ShowRows, TruncateTableOptions, UpdateRowsOptions,
-    ValidateQueryOptions,
+    GetDataAggregate, GetDataFilter, GetDataOptions, GetDataPivot, GetDataSource, GetDataTransform,
+    GetDataViewsOptions, GetQueriesOptions, GetQueryDetailsOptions, GetQueryViewsOptions,
+    GetSchemasOptions, ImportDataOptions, ImportDataSource, InsertOption, InsertRowsOptions,
+    MoveRowsOptions, RequestMethod, SaveQueryViewsOptions, SaveRowsCommand, SaveRowsOptions,
+    SaveSessionViewOptions, SelectDistinctOptions, SelectRowsOptions, ShowRows,
+    TruncateTableOptions, UpdateRowsOptions, ValidateQueryOptions,
 };
 use labkey_rs::report::{
     CreateSessionOptions, DeleteSessionOptions, ExecuteFunctionOptions, ExecuteOptions,
@@ -48,6 +47,7 @@ use labkey_rs::security::{
     RenameContainerOptions, RenameGroupOptions, SavePolicyOptions, StopImpersonatingOptions,
     WhoAmIOptions,
 };
+use labkey_rs::sort::{ColumnSort, QuerySort};
 use labkey_rs::specimen::{
     AddSpecimensToRequestOptions, AddVialsToRequestOptions, CancelRequestOptions,
     GetOpenRequestsOptions, GetProvidingLocationsOptions, GetRepositoriesOptions,
@@ -671,7 +671,7 @@ async fn select_rows_sends_expected_get_request_shape() {
             SelectRowsOptions::builder()
                 .schema_name("lists".to_string())
                 .query_name("People".to_string())
-                .sort("Name".to_string())
+                .sort(QuerySort::parse("Name"))
                 .build(),
         )
         .await
@@ -705,7 +705,7 @@ async fn execute_sql_sends_expected_post_request_shape() {
             ExecuteSqlOptions::builder()
                 .schema_name("core".to_string())
                 .sql("SELECT DisplayName FROM core.users".to_string())
-                .sort("DisplayName".to_string())
+                .sort(QuerySort::parse("DisplayName"))
                 .build(),
         )
         .await
@@ -766,12 +766,7 @@ async fn get_data_query_source_posts_expected_body_and_returns_rows() {
                 .include_details_column(true)
                 .max_rows(25)
                 .offset(5)
-                .sort(vec![
-                    GetDataSort::builder()
-                        .field_key(vec!["Name".to_string()])
-                        .dir(GetDataSortDirection::Desc)
-                        .build(),
-                ])
+                .sort(vec![ColumnSort::descending("Name")])
                 .build(),
         )
         .await
@@ -5145,7 +5140,7 @@ async fn select_rows_uses_custom_data_region_name_as_param_prefix() {
                 .query_name("People".to_string())
                 .data_region_name("QWP".to_string())
                 .columns(vec!["Name".into(), "Age".into()])
-                .sort("Name".to_string())
+                .sort(QuerySort::parse("Name"))
                 .view_name("MyView".to_string())
                 .build(),
         )
@@ -5431,7 +5426,7 @@ async fn select_rows_method_post_with_custom_data_region() {
                 .query_name("People".to_string())
                 .method(RequestMethod::Post)
                 .data_region_name("QWP".to_string())
-                .sort("Name".to_string())
+                .sort(QuerySort::parse("Name"))
                 .build(),
         )
         .await

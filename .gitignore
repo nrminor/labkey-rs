@@ -38,6 +38,7 @@
 !/src/pipeline.rs
 !/src/query.rs
 !/src/report.rs
+!/src/sort.rs
 !/src/security
 !/src/security/mod.rs
 !/src/security/types.rs

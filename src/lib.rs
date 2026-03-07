@@ -38,6 +38,7 @@ pub mod pipeline;
 pub mod query;
 pub mod report;
 pub mod security;
+pub mod sort;
 pub mod specimen;
 pub mod storage;
 pub mod visualization;

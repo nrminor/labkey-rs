@@ -286,8 +286,12 @@ pub struct SelectRowsOptions {
     pub columns: Option<Vec<String>>,
     /// Filters to apply to the query.
     pub filter_array: Option<Vec<Filter>>,
-    /// Sort specification (e.g., `"Name"` or `"-Created"` for descending).
-    pub sort: Option<String>,
+    /// Sort specification (e.g., `"Name"` ascending, `"-Created"` descending).
+    ///
+    /// Use [`QuerySort::parse`](crate::sort::QuerySort::parse) to build from
+    /// the comma-separated wire format, or construct programmatically with
+    /// [`ColumnSort`](crate::sort::ColumnSort) helpers.
+    pub sort: Option<crate::sort::QuerySort>,
     /// Named view to use.
     pub view_name: Option<String>,
     /// Maximum number of rows to return. Use a negative value to return
@@ -354,7 +358,10 @@ pub struct ExecuteSqlOptions {
     /// Row offset for pagination.
     pub offset: Option<i64>,
     /// Sort specification.
-    pub sort: Option<String>,
+    ///
+    /// Use [`QuerySort::parse`](crate::sort::QuerySort::parse) to build from
+    /// the comma-separated wire format, or construct programmatically.
+    pub sort: Option<crate::sort::QuerySort>,
     /// Container filter scope.
     pub container_filter: Option<ContainerFilter>,
     /// Whether to include the total row count in the response.
@@ -630,8 +637,11 @@ pub struct SelectDistinctOptions {
     pub data_region_name: Option<String>,
     /// Filters to apply to the query.
     pub filter_array: Option<Vec<Filter>>,
-    /// Sort specification (for example, `"Name"` or `"-Created"`).
-    pub sort: Option<String>,
+    /// Sort specification (for example, `"Name"` ascending, `"-Created"` descending).
+    ///
+    /// Use [`QuerySort::parse`](crate::sort::QuerySort::parse) to build from
+    /// the comma-separated wire format, or construct programmatically.
+    pub sort: Option<crate::sort::QuerySort>,
     /// Named view to use.
     pub view_name: Option<String>,
     /// Maximum number of rows to return. Use `-1` to request all rows.
@@ -763,25 +773,11 @@ impl GetDataSource {
     }
 }
 
-/// Sort direction for [`GetDataSort`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum GetDataSortDirection {
-    /// Ascending sort.
-    Asc,
-    /// Descending sort.
-    Desc,
-}
-
-/// Sort descriptor for [`LabkeyClient::get_data`].
-#[derive(Debug, Clone, bon::Builder)]
-#[non_exhaustive]
-pub struct GetDataSort {
-    /// Field key parts of the column to sort.
-    pub field_key: Vec<String>,
-    /// Sort direction. Defaults to server behavior when omitted.
-    pub dir: Option<GetDataSortDirection>,
-}
+// `GetDataSort` and `GetDataSortDirection` formerly lived here. They have been
+// replaced by `crate::sort::ColumnSort` and `crate::sort::SortDirection`. The
+// client method converts `ColumnSort` column names (e.g. `"Lookup/Name"`) into
+// the `fieldKey: ["Lookup", "Name"]` array format that the GetData JSON body
+// expects.
 
 /// Filter descriptor for [`GetDataTransform`].
 #[derive(Debug, Clone, bon::Builder)]
@@ -846,7 +842,12 @@ pub struct GetDataOptions {
     /// Row offset used for paging.
     pub offset: Option<i64>,
     /// Sort descriptors.
-    pub sort: Option<Vec<GetDataSort>>,
+    ///
+    /// Each [`ColumnSort`](crate::sort::ColumnSort) specifies a column name
+    /// and direction. For lookup columns, use slash notation (e.g.
+    /// `"Lookup/Name"`) — the client splits this into the `fieldKey` array
+    /// that the `GetData` JSON body expects.
+    pub sort: Option<Vec<crate::sort::ColumnSort>>,
     /// Optional transforms applied server-side.
     pub transforms: Option<Vec<GetDataTransform>>,
     /// Optional pivot configuration.
@@ -1267,7 +1268,7 @@ pub struct QueryViewFilter {
 #[non_exhaustive]
 pub struct QueryViewSort {
     /// Sort direction.
-    pub dir: String,
+    pub dir: crate::sort::SortDirection,
     /// Field key being sorted.
     pub field_key: String,
 }
@@ -1786,16 +1787,15 @@ impl LabkeyClient {
         }
     }
 
-    fn map_get_data_sorts(sorts: Option<Vec<GetDataSort>>) -> Option<Vec<GetDataBodySort>> {
+    fn map_get_data_sorts(
+        sorts: Option<Vec<crate::sort::ColumnSort>>,
+    ) -> Option<Vec<GetDataBodySort>> {
         sorts.map(|items| {
             items
                 .into_iter()
                 .map(|sort| GetDataBodySort {
-                    field_key: sort.field_key,
-                    dir: sort.dir.map(|d| match d {
-                        GetDataSortDirection::Asc => "ASC".to_string(),
-                        GetDataSortDirection::Desc => "DESC".to_string(),
-                    }),
+                    field_key: sort.column().split('/').map(String::from).collect(),
+                    dir: Some(sort.direction().to_string()),
                 })
                 .collect()
         })
@@ -3879,13 +3879,9 @@ mod tests {
         assert_eq!(count, 2);
     }
 
-    #[test]
-    fn get_data_sort_direction_variant_count_regression() {
-        let count = match GetDataSortDirection::Asc {
-            GetDataSortDirection::Asc | GetDataSortDirection::Desc => 2,
-        };
-        assert_eq!(count, 2);
-    }
+    // `GetDataSortDirection` variant count test was here — type removed in
+    // favor of `crate::sort::SortDirection`. The equivalent test now lives
+    // in `sort::tests::sort_direction_variant_count_regression`.
 
     #[test]
     fn import_data_response_deserializes_with_job_id() {
