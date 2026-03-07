@@ -291,6 +291,32 @@ mod tests {
     }
 
     #[test]
+    fn recipient_principal_id_serializes_with_type_and_principal_id_keys() {
+        let recipient = Recipient::principal_id(RecipientType::Cc, 42);
+        let json = serde_json::to_value(&recipient).expect("should serialize");
+
+        assert_eq!(json["type"], serde_json::json!("CC"));
+        assert_eq!(json["principalId"], serde_json::json!(42));
+        assert!(
+            json.get("address").is_none(),
+            "PrincipalId variant should not include an address key"
+        );
+
+        let round_tripped: Recipient =
+            serde_json::from_value(json).expect("should deserialize back");
+        match round_tripped {
+            Recipient::PrincipalId {
+                type_,
+                principal_id,
+            } => {
+                assert_eq!(type_, RecipientType::Cc);
+                assert_eq!(principal_id, 42);
+            }
+            other => panic!("expected PrincipalId variant, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn send_message_response_deserializes_happy_and_minimal_shapes() {
         let happy: SendMessageResponse = serde_json::from_value(serde_json::json!({
             "success": true,

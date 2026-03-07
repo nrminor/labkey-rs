@@ -943,6 +943,55 @@ mod tests {
     }
 
     #[test]
+    fn encode_filters_preserves_special_characters_in_column_names_and_values() {
+        let filters = vec![
+            Filter::equal("En<cod ed", "Va|ue?"),
+            Filter::new(
+                "Col&Name",
+                FilterType::GreaterThan,
+                FilterValue::Single("100%".into()),
+            ),
+        ];
+        let pairs = encode_filters(&filters, "query");
+
+        assert_eq!(pairs.len(), 2);
+        assert_eq!(pairs[0].0, "query.En<cod ed~eq");
+        assert_eq!(pairs[0].1, "Va|ue?");
+        assert_eq!(pairs[1].0, "query.Col&Name~gt");
+        assert_eq!(pairs[1].1, "100%");
+    }
+
+    #[test]
+    fn container_filter_rejects_unknown_variant_on_deserialization() {
+        let result = serde_json::from_str::<ContainerFilter>(r#""FutureFilter""#);
+        assert!(
+            result.is_err(),
+            "ContainerFilter uses standard serde enum deserialization and should reject unknown variants"
+        );
+        let err_msg = result
+            .expect_err("unknown variant should fail deserialization")
+            .to_string();
+        assert!(
+            err_msg.contains("FutureFilter"),
+            "error message should mention the unrecognized variant, got: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn encode_filters_handles_duplicate_column_and_type_as_separate_entries() {
+        let filters = vec![Filter::equal("Name", "Alice"), Filter::equal("Name", "Bob")];
+        let pairs = encode_filters(&filters, "query");
+
+        assert_eq!(
+            pairs.len(),
+            2,
+            "duplicate column+type should produce two entries"
+        );
+        assert_eq!(pairs[0], ("query.Name~eq".into(), "Alice".into()));
+        assert_eq!(pairs[1], ("query.Name~eq".into(), "Bob".into()));
+    }
+
+    #[test]
     fn container_filter_round_trips_all_variants() {
         let variants = [
             ContainerFilter::AllFolders,

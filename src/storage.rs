@@ -314,6 +314,44 @@ mod tests {
     }
 
     #[test]
+    fn create_storage_body_serializes_type_and_props() {
+        let body = StorageCommandBody {
+            storage_type: StorageType::PrimaryStorage,
+            props: serde_json::json!({ "name": "Main Storage", "temperature": -20 }),
+        };
+        let json = serde_json::to_value(body).expect("body should serialize");
+
+        let obj = json.as_object().expect("top level must be an object");
+        assert_eq!(
+            obj.len(),
+            2,
+            "body should have exactly two top-level keys: type and props"
+        );
+        assert_eq!(json["type"], serde_json::json!("Primary Storage"));
+        assert_eq!(json["props"]["name"], serde_json::json!("Main Storage"));
+        assert_eq!(json["props"]["temperature"], serde_json::json!(-20));
+    }
+
+    #[test]
+    fn update_storage_body_serializes_type_and_props_with_row_id() {
+        let body = StorageCommandBody {
+            storage_type: StorageType::TerminalStorageLocation,
+            props: serde_json::json!({ "rowId": 5, "label": "Box A" }),
+        };
+        let json = serde_json::to_value(body).expect("body should serialize");
+
+        let obj = json.as_object().expect("top level must be an object");
+        assert_eq!(
+            obj.len(),
+            2,
+            "body should have exactly two top-level keys: type and props"
+        );
+        assert_eq!(json["type"], serde_json::json!("Terminal Storage Location"));
+        assert_eq!(json["props"]["rowId"], serde_json::json!(5));
+        assert_eq!(json["props"]["label"], serde_json::json!("Box A"));
+    }
+
+    #[test]
     fn storage_type_round_trip_and_variant_count_regression() {
         let pairs = [
             (StorageType::Canister, "\"Canister\""),

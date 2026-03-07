@@ -662,6 +662,46 @@ mod tests {
     }
 
     #[test]
+    fn get_file_status_params_emit_repeated_file_keys_and_required_fields() {
+        let options = GetFileStatusOptions::builder()
+            .files(vec!["run1.tsv".to_string(), "run2.tsv".to_string()])
+            .path("imports".to_string())
+            .protocol_name("RNAseq".to_string())
+            .task_id("task-1".to_string())
+            .build();
+
+        let params = build_get_file_status_params(&options);
+
+        assert!(params.contains(&("path".into(), "imports".into())));
+        assert!(params.contains(&("protocolName".into(), "RNAseq".into())));
+        assert!(params.contains(&("taskId".into(), "task-1".into())));
+
+        let file_params: Vec<_> = params.iter().filter(|(k, _)| k == "file").collect();
+        assert_eq!(
+            file_params.len(),
+            2,
+            "each file should be a separate 'file' param"
+        );
+        assert_eq!(file_params[0].1, "run1.tsv");
+        assert_eq!(file_params[1].1, "run2.tsv");
+    }
+
+    #[test]
+    fn get_protocols_params_emit_include_workbooks_true_when_set() {
+        let options = GetProtocolsOptions::builder()
+            .path("imports".to_string())
+            .task_id("task-1".to_string())
+            .include_workbooks(true)
+            .build();
+
+        let params = build_get_protocols_params(&options);
+
+        assert!(params.contains(&("includeWorkbooks".into(), "true".into())));
+        assert!(params.contains(&("path".into(), "imports".into())));
+        assert!(params.contains(&("taskId".into(), "task-1".into())));
+    }
+
+    #[test]
     fn get_file_status_validation_rejects_blank_path_and_empty_files() {
         let options = GetFileStatusOptions::builder()
             .files(vec![])

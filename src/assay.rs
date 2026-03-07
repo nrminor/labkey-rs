@@ -2342,4 +2342,95 @@ mod tests {
 
         assert_eq!(explicit_false, default_mode);
     }
+
+    #[test]
+    fn get_study_nab_graph_url_params_emit_repeated_id_keys() {
+        let options = GetStudyNabGraphUrlOptions::builder()
+            .object_ids(vec![
+                "obj-1".to_string(),
+                "obj-2".to_string(),
+                "obj-3".to_string(),
+            ])
+            .chart_title("My Chart".to_string())
+            .fit_type(FitType::FourParameter)
+            .height(400)
+            .width(600)
+            .build();
+
+        let params = build_get_study_nab_graph_url_params(&options);
+
+        let id_params: Vec<_> = params.iter().filter(|(k, _)| k == "id").collect();
+        assert_eq!(
+            id_params.len(),
+            3,
+            "each objectId should be a separate 'id' param"
+        );
+        assert_eq!(id_params[0].1, "obj-1");
+        assert_eq!(id_params[1].1, "obj-2");
+        assert_eq!(id_params[2].1, "obj-3");
+
+        assert!(params.contains(&("chartTitle".into(), "My Chart".into())));
+        assert!(params.contains(&("fitType".into(), "FOUR_PARAMETER".into())));
+        assert!(params.contains(&("height".into(), "400".into())));
+        assert!(params.contains(&("width".into(), "600".into())));
+    }
+
+    #[test]
+    fn get_study_nab_graph_url_params_omit_optional_fields_when_absent() {
+        let options = GetStudyNabGraphUrlOptions::builder()
+            .object_ids(vec!["obj-1".to_string()])
+            .build();
+
+        let params = build_get_study_nab_graph_url_params(&options);
+
+        assert_eq!(
+            params.len(),
+            1,
+            "only the single id param should be emitted when all optionals are None"
+        );
+        assert_eq!(params[0], ("id".into(), "obj-1".into()));
+    }
+
+    #[test]
+    fn get_study_nab_runs_params_emit_repeated_object_ids_keys() {
+        let options = GetStudyNabRunsOptions::builder()
+            .object_ids(vec!["run-a".to_string(), "run-b".to_string()])
+            .calculate_neut(true)
+            .include_fit_parameters(false)
+            .include_stats(true)
+            .include_wells(false)
+            .build();
+
+        let params = build_get_study_nab_runs_params(&options);
+
+        let obj_params: Vec<_> = params.iter().filter(|(k, _)| k == "objectIds").collect();
+        assert_eq!(
+            obj_params.len(),
+            2,
+            "each objectId should be a separate 'objectIds' param"
+        );
+        assert_eq!(obj_params[0].1, "run-a");
+        assert_eq!(obj_params[1].1, "run-b");
+
+        assert!(params.contains(&("calculateNeut".into(), "true".into())));
+        assert!(params.contains(&("includeFitParameters".into(), "false".into())));
+        assert!(params.contains(&("includeStats".into(), "true".into())));
+        assert!(params.contains(&("includeWells".into(), "false".into())));
+    }
+
+    #[test]
+    fn get_study_nab_runs_params_omit_optional_fields_when_absent() {
+        let options = GetStudyNabRunsOptions::builder()
+            .object_ids(vec!["run-a".to_string()])
+            .build();
+
+        let params = build_get_study_nab_runs_params(&options);
+
+        assert_eq!(
+            params.len(),
+            1,
+            "only the single objectIds param should be emitted when all optionals are None"
+        );
+        assert_eq!(params[0], ("objectIds".into(), "run-a".into()));
+    }
 }
