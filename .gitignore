@@ -81,6 +81,31 @@
 !/skills/labkey-rs
 !/skills/labkey-rs/SKILL.md
 
+# === Allowed: Book (mdbook static site) ===
+!/book
+!/book/book.toml
+!/book/src
+!/book/src/SUMMARY.md
+!/book/src/introduction.md
+!/book/src/guides
+!/book/src/guides/getting-started.md
+!/book/src/guides/how-labkey-works.md
+!/book/src/guides/authentication.md
+!/book/src/guides/querying-data.md
+!/book/src/guides/modifying-data.md
+!/book/src/guides/filters-and-sorts.md
+!/book/src/guides/error-handling.md
+!/book/src/recipes
+!/book/src/recipes/paginate-results.md
+!/book/src/recipes/cross-folder-queries.md
+!/book/src/recipes/bulk-import.md
+!/book/src/recipes/labkey-sql.md
+!/book/src/recipes/working-with-assays.md
+!/book/src/recipes/managing-lists.md
+!/book/src/recipes/security-and-permissions.md
+!/book/src/reference
+!/book/src/reference/module-map.md
+
 # === Allowed: GitHub workflows ===
 !/.github
 !/.github/workflows

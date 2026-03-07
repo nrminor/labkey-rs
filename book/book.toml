@@ -1,0 +1,15 @@
+[book]
+title = "labkey-rs"
+description = "Documentation for the unofficial Rust client for the LabKey Server REST API"
+authors = ["Nicholas Minor"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "build"
+
+[output.html]
+git-repository-url = "https://github.com/nickminor/labkey-rs"
+edit-url-template = "https://github.com/nickminor/labkey-rs/edit/main/book/{path}"
+no-section-label = false
+additional-css = []

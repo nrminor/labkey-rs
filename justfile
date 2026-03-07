@@ -120,6 +120,18 @@ doc-check:
 doc:
     cargo doc --no-deps --open
 
+# Build the mdbook documentation site
+book:
+    mdbook build book/
+
+# Serve the mdbook site locally with live reload
+book-serve:
+    mdbook serve book/ --open
+
+# Clean the mdbook build output
+book-clean:
+    mdbook clean book/
+
 # Count source lines of code (excluding blanks and comments)
 sloc:
     @tokei --types=Rust --compact
