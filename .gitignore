@@ -56,6 +56,12 @@
 !/src/storage.rs
 !/src/visualization.rs
 
+# === Allowed: Examples ===
+!/examples
+!/examples/select_rows.rs
+!/examples/filters_and_sorts.rs
+!/examples/execute_sql.rs
+
 # === Allowed: Tests ===
 !/tests
 !/tests/common
