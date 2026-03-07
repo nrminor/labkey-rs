@@ -162,6 +162,15 @@ pub struct ClientConfig {
     pub accept_self_signed_certs: bool,
     /// Optional proxy URL used for all HTTP and HTTPS requests.
     pub proxy_url: Option<String>,
+    /// Optional CSRF token sent as `X-LABKEY-CSRF` on every request.
+    ///
+    /// Java's `Connection` maintains a full CSRF lifecycle — it reads the
+    /// `X-LABKEY-CSRF` cookie from every response and re-sends it as a header
+    /// on subsequent requests. For API-key authentication the server typically
+    /// does not require CSRF validation, so this client takes a simpler
+    /// approach: supply a token here and it will be included on every request.
+    /// Leave it `None` (the default) for API-key or guest auth.
+    pub csrf_token: Option<String>,
 }
 
 impl ClientConfig {
@@ -179,6 +188,7 @@ impl ClientConfig {
             user_agent: None,
             accept_self_signed_certs: false,
             proxy_url: None,
+            csrf_token: None,
         }
     }
 
@@ -200,6 +210,13 @@ impl ClientConfig {
     #[must_use]
     pub fn with_accept_self_signed_certs(mut self, accept: bool) -> Self {
         self.accept_self_signed_certs = accept;
+        self
+    }
+
+    /// Set a CSRF token to send as `X-LABKEY-CSRF` on every request.
+    #[must_use]
+    pub fn with_csrf_token(mut self, token: impl Into<String>) -> Self {
+        self.csrf_token = Some(token.into());
         self
     }
 }
@@ -245,6 +262,7 @@ pub struct LabkeyClient {
     base_url: Url,
     container_path: String,
     credential: Credential,
+    csrf_token: Option<String>,
 }
 
 /// Internal request options for fine-grained HTTP behavior.
@@ -276,6 +294,7 @@ impl LabkeyClient {
             base_url,
             container_path: config.container_path,
             credential: config.credential,
+            csrf_token: config.csrf_token,
         })
     }
 
@@ -334,9 +353,13 @@ impl LabkeyClient {
     /// Apply standard headers and authentication to a request builder.
     ///
     /// Sets `X-Requested-With: XMLHttpRequest` (which `LabKey` servers expect
-    /// on API requests) and the appropriate authentication credentials.
+    /// on API requests), the appropriate authentication credentials, and the
+    /// `X-LABKEY-CSRF` header when a CSRF token is configured.
     fn prepare_request(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        let builder = builder.header("X-Requested-With", "XMLHttpRequest");
+        let mut builder = builder.header("X-Requested-With", "XMLHttpRequest");
+        if let Some(token) = &self.csrf_token {
+            builder = builder.header("X-LABKEY-CSRF", token.as_str());
+        }
         match &self.credential {
             Credential::Basic { email, password } => builder.basic_auth(email, Some(password)),
             Credential::ApiKey(key) => builder.basic_auth("apikey", Some(key)),
@@ -551,8 +574,15 @@ impl LabkeyClient {
     /// Check the response status and either deserialize the success body or
     /// construct an appropriate error.
     ///
-    /// On non-success status codes, the body is read as text and we attempt to
-    /// parse it as [`ApiErrorBody`]. If that fails, we return
+    /// `LabKey` sometimes returns HTTP 200 with a JSON body containing an
+    /// `"exception"` key instead of the expected response shape. Java's
+    /// `Command.java` detects this and throws `CommandException`. We match
+    /// that behavior: on success status codes, we read the body as text,
+    /// check for an embedded exception, and return [`LabkeyError::Api`] if
+    /// found. Otherwise we deserialize into `T`.
+    ///
+    /// On non-success status codes, the body is read as text and we attempt
+    /// to parse it as [`ApiErrorBody`]. If that fails, we return
     /// [`LabkeyError::UnexpectedResponse`] with the raw text.
     async fn handle_response<T: serde::de::DeserializeOwned>(
         &self,
@@ -560,11 +590,17 @@ impl LabkeyClient {
         accepted_statuses: &[StatusCode],
     ) -> Result<T, LabkeyError> {
         let status = response.status();
+        let text = response.text().await?;
+
         if status.is_success() || accepted_statuses.contains(&status) {
-            let body = response.json::<T>().await?;
-            Ok(body)
+            if let Some(api_error) = Self::check_for_embedded_exception(&text) {
+                return Err(LabkeyError::Api {
+                    status,
+                    body: api_error,
+                });
+            }
+            Ok(serde_json::from_str::<T>(&text)?)
         } else {
-            let text = response.text().await.unwrap_or_default();
             match serde_json::from_str::<ApiErrorBody>(&text) {
                 Ok(api_error) => Err(LabkeyError::Api {
                     status,
@@ -575,16 +611,42 @@ impl LabkeyClient {
         }
     }
 
+    /// Check whether a response body contains an embedded `LabKey` exception.
+    ///
+    /// `LabKey` sometimes returns HTTP 200 with a JSON body like
+    /// `{"exception": "Something went wrong", "exceptionClass": "..."}`.
+    /// This method uses a cheap string heuristic to avoid parsing the body
+    /// as [`ApiErrorBody`] on every request — only when the text contains
+    /// `"exception"` do we attempt the parse.
+    fn check_for_embedded_exception(text: &str) -> Option<ApiErrorBody> {
+        if !text.contains("\"exception\"") {
+            return None;
+        }
+        let body: ApiErrorBody = serde_json::from_str(text).ok()?;
+        if body.exception.is_some() {
+            Some(body)
+        } else {
+            None
+        }
+    }
+
     async fn handle_empty_response(
         &self,
         response: reqwest::Response,
         accepted_statuses: &[StatusCode],
     ) -> Result<(), LabkeyError> {
         let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+
         if status.is_success() || accepted_statuses.contains(&status) {
+            if let Some(api_error) = Self::check_for_embedded_exception(&text) {
+                return Err(LabkeyError::Api {
+                    status,
+                    body: api_error,
+                });
+            }
             Ok(())
         } else {
-            let text = response.text().await.unwrap_or_default();
             match serde_json::from_str::<ApiErrorBody>(&text) {
                 Ok(api_error) => Err(LabkeyError::Api {
                     status,
@@ -763,6 +825,7 @@ mod tests {
             user_agent: None,
             accept_self_signed_certs: false,
             proxy_url: None,
+            csrf_token: None,
         };
     }
 
@@ -779,6 +842,7 @@ mod tests {
         assert!(config.user_agent.is_none());
         assert!(!config.accept_self_signed_certs);
         assert!(config.proxy_url.is_none());
+        assert!(config.csrf_token.is_none());
     }
 
     #[test]
@@ -1067,5 +1131,109 @@ machine third.example.com login carol password pw3\n";
 
         let result = Credential::from_netrc_reader(reader, "labkey.example.com");
         assert!(result.is_err(), "should fail when netrc content is empty");
+    }
+
+    #[test]
+    fn csrf_token_header_is_sent_when_configured() {
+        let config = ClientConfig::new(
+            "https://labkey.example.com/labkey",
+            Credential::ApiKey("test-key".into()),
+            "/MyProject",
+        )
+        .with_csrf_token("abc123");
+
+        let client = LabkeyClient::new(config).expect("valid config with CSRF token");
+        let url = client.build_url("query", "getQuery.api", None);
+        let request = client
+            .build_get_request(&client.http, url, &[], &RequestOptions::default())
+            .expect("should build request");
+
+        assert_eq!(
+            request
+                .headers()
+                .get("X-LABKEY-CSRF")
+                .and_then(|v| v.to_str().ok()),
+            Some("abc123"),
+            "CSRF token should be sent as X-LABKEY-CSRF header"
+        );
+    }
+
+    #[test]
+    fn csrf_token_header_is_absent_when_not_configured() {
+        let client = test_client("https://labkey.example.com/labkey", "/MyProject");
+        let url = client.build_url("query", "getQuery.api", None);
+        let request = client
+            .build_get_request(&client.http, url, &[], &RequestOptions::default())
+            .expect("should build request");
+
+        assert!(
+            request.headers().get("X-LABKEY-CSRF").is_none(),
+            "CSRF header should not be present when no token is configured"
+        );
+    }
+
+    #[test]
+    fn check_for_embedded_exception_detects_exception_in_200_body() {
+        let text = r#"{"exception": "Query failed", "exceptionClass": "org.labkey.api.query.QueryParseException"}"#;
+        let result = LabkeyClient::check_for_embedded_exception(text);
+        assert!(result.is_some(), "should detect embedded exception");
+        let body = result.expect("already checked is_some");
+        assert_eq!(body.exception.as_deref(), Some("Query failed"));
+        assert_eq!(
+            body.exception_class.as_deref(),
+            Some("org.labkey.api.query.QueryParseException")
+        );
+    }
+
+    #[test]
+    fn check_for_embedded_exception_returns_none_for_normal_response() {
+        let text = r#"{"rows": [], "rowCount": 0}"#;
+        assert!(
+            LabkeyClient::check_for_embedded_exception(text).is_none(),
+            "normal response without 'exception' key should not trigger detection"
+        );
+    }
+
+    #[test]
+    fn check_for_embedded_exception_returns_none_for_empty_body() {
+        assert!(
+            LabkeyClient::check_for_embedded_exception("").is_none(),
+            "empty body should not trigger detection"
+        );
+    }
+
+    #[test]
+    fn check_for_embedded_exception_ignores_exception_as_value_not_key() {
+        let text = r#"{"message": "This is not an exception", "status": "ok"}"#;
+        assert!(
+            LabkeyClient::check_for_embedded_exception(text).is_none(),
+            "the word 'exception' appearing as a value (not a key) should not trigger detection"
+        );
+    }
+
+    #[test]
+    fn check_for_embedded_exception_returns_none_when_exception_is_null() {
+        let text = r#"{"exception": null, "exceptionClass": null}"#;
+        assert!(
+            LabkeyClient::check_for_embedded_exception(text).is_none(),
+            "null exception value should not be treated as an embedded error"
+        );
+    }
+
+    #[test]
+    fn check_for_embedded_exception_handles_exception_with_errors_array() {
+        let text = r#"{
+            "exception": "Validation failed",
+            "exceptionClass": "org.labkey.api.action.ValidationException",
+            "errors": [{"id": "Name", "msg": "Name is required"}]
+        }"#;
+        let result = LabkeyClient::check_for_embedded_exception(text);
+        assert!(
+            result.is_some(),
+            "should detect exception with errors array"
+        );
+        let body = result.expect("already checked is_some");
+        assert_eq!(body.errors.len(), 1);
+        assert_eq!(body.errors[0].msg.as_deref(), Some("Name is required"));
     }
 }

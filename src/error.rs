@@ -107,7 +107,8 @@ impl LabkeyError {
     /// # Examples
     ///
     /// ```
-    /// use labkey_rs::{LabkeyError, ApiErrorBody};
+    /// use labkey_rs::LabkeyError;
+    /// use labkey_rs::error::ApiErrorBody;
     ///
     /// let err = LabkeyError::Api {
     ///     status: reqwest::StatusCode::BAD_REQUEST,

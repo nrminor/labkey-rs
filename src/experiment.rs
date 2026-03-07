@@ -1752,6 +1752,7 @@ mod tests {
             user_agent: None,
             accept_self_signed_certs: false,
             proxy_url: None,
+            csrf_token: None,
         })
         .expect("valid test client")
     }
