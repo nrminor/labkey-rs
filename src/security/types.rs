@@ -1,4 +1,4 @@
-//! Shared security response models used by `LabKey` security endpoints.
+//! Shared security response models used by LabKey security endpoints.
 
 use serde::{Deserialize, Serialize};
 
@@ -409,7 +409,7 @@ pub struct SecurableResource {
 /// `Policy` interface (`security/Policy.ts:51-60`).
 ///
 /// Despite the field name, `user_id` is a principal id that can refer to
-/// either a user or a group — the `LabKey` security model treats both as
+/// either a user or a group — the LabKey security model treats both as
 /// principals.
 #[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
 #[serde(rename_all = "camelCase")]

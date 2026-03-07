@@ -1,4 +1,4 @@
-//! Query endpoints and response types for the `LabKey` REST API.
+//! Query endpoints and response types for the LabKey REST API.
 //!
 //! This module provides [`SelectRowsOptions`] and [`ExecuteSqlOptions`] for
 //! the two primary query endpoints, along with the response types that model
@@ -19,7 +19,7 @@ use crate::{
     filter::{ContainerFilter, Filter, encode_filters},
 };
 
-/// Prefix used by `LabKey` for URL-valued hidden columns.
+/// Prefix used by LabKey for URL-valued hidden columns.
 pub const URL_COLUMN_PREFIX: &str = "_labkeyurl_";
 
 /// HTTP method for query read endpoints like [`LabkeyClient::select_rows`].
@@ -237,7 +237,7 @@ pub struct ModifyRowsResults {
 
 /// Response from [`LabkeyClient::truncate_table`].
 ///
-/// The `LabKey` server returns `deletedRows` (not `rowsAffected`) for
+/// The LabKey server returns `deletedRows` (not `rowsAffected`) for
 /// truncation operations. All fields are optional to match the Java
 /// client's `getProperty` null-return pattern.
 #[derive(Debug, Clone, Deserialize)]
@@ -706,7 +706,7 @@ pub struct GetQueriesOptions {
     pub container_path: Option<String>,
     /// Include column metadata for each query.
     pub include_columns: Option<bool>,
-    /// Include `LabKey` system-defined queries.
+    /// Include LabKey system-defined queries.
     pub include_system_queries: Option<bool>,
     /// Include custom query titles.
     pub include_title: Option<bool>,
@@ -1077,7 +1077,7 @@ pub struct DeleteQueryViewOptions {
     pub container_path: Option<String>,
     /// View name to delete or revert.
     pub view_name: Option<String>,
-    /// Revert mode flag from `LabKey`'s delete-view API.
+    /// Revert mode flag from LabKey's delete-view API.
     pub revert: Option<bool>,
 }
 
@@ -1097,7 +1097,7 @@ pub struct QueryInfo {
     pub can_edit_shared_views: bool,
     /// Query columns in this listing response.
     ///
-    /// This field is intentionally untyped because `LabKey` varies column
+    /// This field is intentionally untyped because LabKey varies column
     /// payload detail based on request flags (for example,
     /// `queryDetailColumns`).
     #[serde(default)]
@@ -1443,7 +1443,7 @@ pub struct QueryDetailsResponse {
 
 /// Encode a string to avoid web application firewall false positives.
 ///
-/// `LabKey` endpoints that accept SQL or script content use this encoding to
+/// LabKey endpoints that accept SQL or script content use this encoding to
 /// prevent WAFs from rejecting legitimate content. The encoding is
 /// URL-encode first, then base64-encode, then prepend a magic prefix that
 /// tells the server how to decode it.
@@ -1480,7 +1480,7 @@ pub fn sql_string_literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
 
-/// Convert a date-like value to a `LabKey` SQL date literal.
+/// Convert a date-like value to a LabKey SQL date literal.
 ///
 /// Empty strings return `NULL`.
 #[must_use]
@@ -1491,7 +1491,7 @@ pub fn sql_date_literal(value: &str) -> String {
     format!("{{d {}}}", sql_string_literal(value))
 }
 
-/// Convert a date-time-like value to a `LabKey` SQL timestamp literal.
+/// Convert a date-time-like value to a LabKey SQL timestamp literal.
 ///
 /// Empty strings return `NULL`.
 #[must_use]
@@ -1834,7 +1834,7 @@ impl LabkeyClient {
         })
     }
 
-    /// Select rows from a `LabKey` query.
+    /// Select rows from a LabKey query.
     ///
     /// Sends a GET request to the `query-getQuery.api` endpoint with the
     /// specified filters, sort, pagination, and column options encoded as
@@ -1962,7 +1962,7 @@ impl LabkeyClient {
     ///
     /// Sends a request to `query-selectDistinct.api` and returns distinct
     /// values for one column. The request defaults to a query region prefix of
-    /// `query`, matching `LabKey`'s JS client behavior.
+    /// `query`, matching LabKey's JS client behavior.
     ///
     /// # Errors
     ///
@@ -2460,7 +2460,7 @@ impl LabkeyClient {
 
     /// List report/query/dataset data views and return the inner `data` payload.
     ///
-    /// Sends a POST request to `reports-browseData.api` with `LabKey`'s required
+    /// Sends a POST request to `reports-browseData.api` with LabKey's required
     /// defaults `includeData: true` and `includeMetadata: false`.
     ///
     /// # Errors
@@ -2589,7 +2589,7 @@ impl LabkeyClient {
         self.get(url, &params).await
     }
 
-    /// Return the current date/time from the `LabKey` server.
+    /// Return the current date/time from the LabKey server.
     ///
     /// Sends a GET request to `query-getServerDate.api` with no query
     /// parameters and no container path segment.
@@ -3142,7 +3142,7 @@ impl LabkeyClient {
         self.post(url, &body).await
     }
 
-    /// Execute arbitrary `LabKey` SQL.
+    /// Execute arbitrary LabKey SQL.
     ///
     /// Sends a POST request to the `query-executeSql.api` endpoint with the
     /// SQL in the JSON body (WAF-encoded to avoid firewall false positives).

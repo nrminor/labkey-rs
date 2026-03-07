@@ -2,7 +2,7 @@
 
 use crate::filter::ContainerFilter;
 
-/// Controls how `LabKey` records audit details for write operations.
+/// Controls how LabKey records audit details for write operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum AuditBehavior {

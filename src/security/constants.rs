@@ -4,7 +4,7 @@
 /// Commonly used permission type strings matching the JS `PermissionTypes` enum.
 ///
 /// Each constant is the fully-qualified Java class name of the corresponding
-/// `LabKey` permission. Use these with [`Container::has_effective_permission`]
+/// LabKey permission. Use these with [`Container::has_effective_permission`]
 /// to test whether a user or group has a particular permission.
 ///
 /// This type cannot be instantiated; it exists only to namespace the constants.
@@ -89,7 +89,7 @@ impl PermissionTypes {
 /// Commonly used permission role strings matching the JS `PermissionRoles` enum.
 ///
 /// Each constant is the fully-qualified Java class name of the corresponding
-/// `LabKey` role. Use these when assigning or checking roles on containers,
+/// LabKey role. Use these when assigning or checking roles on containers,
 /// resources, or policies.
 ///
 /// This type cannot be instantiated; it exists only to namespace the constants.
@@ -112,7 +112,7 @@ impl PermissionRoles {
     pub const READER: &str = "org.labkey.api.security.roles.ReaderRole";
 }
 
-/// System group IDs that are constant across all `LabKey` Server installations.
+/// System group IDs that are constant across all LabKey Server installations.
 ///
 /// These negative IDs are assigned at initial server startup and never change.
 /// Use them to reference the built-in system groups by ID rather than by name.

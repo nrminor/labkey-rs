@@ -11,7 +11,7 @@ use crate::{
     error::LabkeyError,
 };
 
-/// Domain kind values used by `LabKey` property APIs.
+/// Domain kind values used by LabKey property APIs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum DomainKind {

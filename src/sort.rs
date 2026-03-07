@@ -1,6 +1,6 @@
-//! Sort specification types for `LabKey` query endpoints.
+//! Sort specification types for LabKey query endpoints.
 //!
-//! `LabKey` query endpoints accept a comma-separated sort string where each
+//! LabKey query endpoints accept a comma-separated sort string where each
 //! segment is a column name optionally prefixed with `-` for descending order.
 //! For example, `"Name,-Created"` sorts by `Name` ascending then `Created`
 //! descending.
@@ -156,7 +156,7 @@ impl fmt::Display for ColumnSort {
     }
 }
 
-/// A parsed sort specification for `LabKey` query endpoints.
+/// A parsed sort specification for LabKey query endpoints.
 ///
 /// Wraps a `Vec<ColumnSort>` and provides [`parse`](Self::parse) for the
 /// comma-separated wire format and a [`Display`](fmt::Display) impl that
@@ -165,7 +165,7 @@ impl fmt::Display for ColumnSort {
 ///
 /// # Wire format
 ///
-/// The `LabKey` sort string is a comma-separated list of column names. A `-`
+/// The LabKey sort string is a comma-separated list of column names. A `-`
 /// prefix indicates descending order. For example:
 ///
 /// - `"Name"` → sort by Name ascending

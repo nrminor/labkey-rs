@@ -6,6 +6,7 @@
 !/.gitignore
 !/Cargo.toml
 !/Cargo.lock
+!/clippy.toml
 !/justfile
 !/AGENTS.md
 !/opencode.json

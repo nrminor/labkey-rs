@@ -1,6 +1,6 @@
-//! Filter types and encoding for `LabKey` query parameters.
+//! Filter types and encoding for LabKey query parameters.
 //!
-//! `LabKey` queries support a rich set of filter operators that are encoded as
+//! LabKey queries support a rich set of filter operators that are encoded as
 //! URL query parameters. A filter on column `"Age"` using the `Equal` operator
 //! with value `"25"` becomes `query.Age~eq=25` in the URL.
 //!
@@ -8,7 +8,7 @@
 //! separator character. If any value itself contains the separator, the values
 //! are wrapped in `{json:[...]}` syntax to avoid ambiguity.
 
-/// The operator for a `LabKey` query filter.
+/// The operator for a LabKey query filter.
 ///
 /// Each variant corresponds to a URL suffix that the server recognizes.
 /// For example, [`FilterType::Equal`] has suffix `"eq"`, so a filter on
@@ -269,7 +269,7 @@ impl FilterType {
 
     /// The canonical programmatic name for this filter type.
     ///
-    /// Returns the `LabKey` cross-client canonical name as used by the Java
+    /// Returns the LabKey cross-client canonical name as used by the Java
     /// client's `Filter.Operator.getProgrammaticName()`. These names appear
     /// in server configurations and are the primary keys accepted by
     /// [`from_name`](Self::from_name).
@@ -332,7 +332,7 @@ impl FilterType {
         }
     }
 
-    /// Look up a [`FilterType`] by its `LabKey` programmatic name.
+    /// Look up a [`FilterType`] by its LabKey programmatic name.
     ///
     /// Accepts the canonical names returned by
     /// [`programmatic_name`](Self::programmatic_name) (e.g., `"EQUAL"`,
@@ -437,7 +437,7 @@ pub enum FilterValue {
     Multi(Vec<String>),
 }
 
-/// A filter to apply to a `LabKey` query.
+/// A filter to apply to a LabKey query.
 ///
 /// Filters are encoded as URL query parameters in the form
 /// `{dataRegionName}.{columnName}~{urlSuffix}={value}`.
@@ -737,9 +737,9 @@ fn parse_multi_value(value: &str, filter_type: FilterType) -> FilterValue {
     }
 }
 
-/// The JSON type of a `LabKey` column, as reported in query metadata.
+/// The JSON type of a LabKey column, as reported in query metadata.
 ///
-/// `LabKey` uses these type strings in column metadata responses to
+/// LabKey uses these type strings in column metadata responses to
 /// describe the data type of a column. They determine which
 /// [`FilterType`] operators are applicable via
 /// [`filter_types_for_column_type`] and [`default_filter_for_column_type`].
@@ -765,7 +765,7 @@ pub enum JsonColumnType {
 }
 
 impl JsonColumnType {
-    /// Parse a `LabKey` JSON type string into a [`JsonColumnType`].
+    /// Parse a LabKey JSON type string into a [`JsonColumnType`].
     ///
     /// Matching is case-insensitive, following the JS client's behavior
     /// of calling `toLowerCase()` on the type string before lookup.

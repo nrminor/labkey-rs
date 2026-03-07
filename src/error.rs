@@ -1,4 +1,4 @@
-//! Error types for the `LabKey` client.
+//! Error types for the LabKey client.
 //!
 //! The central type is [`LabkeyError`], which covers everything from network
 //! failures to structured API errors returned by the server. When the server
@@ -8,7 +8,7 @@
 
 use thiserror::Error;
 
-/// Individual field-level error returned by the `LabKey` server.
+/// Individual field-level error returned by the LabKey server.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct FieldError {
     /// The field this error relates to, if any.
@@ -19,7 +19,7 @@ pub struct FieldError {
     pub msg: Option<String>,
 }
 
-/// Structured error body returned by `LabKey` API endpoints.
+/// Structured error body returned by LabKey API endpoints.
 ///
 /// A typical server error response looks like:
 ///
@@ -54,7 +54,7 @@ impl std::fmt::Display for ApiErrorBody {
     }
 }
 
-/// Errors that can occur when using the `LabKey` client.
+/// Errors that can occur when using the LabKey client.
 #[derive(Debug, Error)]
 pub enum LabkeyError {
     /// HTTP-level error from reqwest (connection failures, timeouts, etc.).
@@ -75,7 +75,7 @@ pub enum LabkeyError {
     },
 
     /// The server returned a non-success status code but the body wasn't
-    /// parseable as a `LabKey` error.
+    /// parseable as a LabKey error.
     #[error("HTTP {status}: {text}")]
     UnexpectedResponse {
         /// The HTTP status code.
@@ -97,7 +97,7 @@ pub enum LabkeyError {
 const API_VERSION_EXCEPTION: &str = "org.labkey.api.action.ApiVersionException";
 
 impl LabkeyError {
-    /// Returns `true` when this error is a `LabKey` API version mismatch.
+    /// Returns `true` when this error is a LabKey API version mismatch.
     ///
     /// The server reports version mismatches with exception class
     /// `org.labkey.api.action.ApiVersionException`. This helper lets callers

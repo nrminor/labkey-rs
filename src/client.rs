@@ -1,7 +1,7 @@
-//! HTTP client and URL construction for the `LabKey` REST API.
+//! HTTP client and URL construction for the LabKey REST API.
 //!
 //! The [`LabkeyClient`] struct is the main entry point for interacting with a
-//! `LabKey` server. It holds a [`reqwest::Client`], the server's base URL, a
+//! LabKey server. It holds a [`reqwest::Client`], the server's base URL, a
 //! default container path, and authentication credentials. Every API endpoint
 //! method is an async method on this struct.
 
@@ -13,7 +13,7 @@ use url::Url;
 
 use crate::error::{ApiErrorBody, LabkeyError};
 
-/// Authentication credentials for a `LabKey` server.
+/// Authentication credentials for a LabKey server.
 #[derive(Debug, Clone)]
 pub enum Credential {
     /// HTTP Basic authentication with an email and password.
@@ -23,8 +23,8 @@ pub enum Credential {
         /// The user's password.
         password: String,
     },
-    /// `LabKey` API key, sent as basic auth with username `"apikey"` and the
-    /// key as the password, per `LabKey` convention.
+    /// LabKey API key, sent as basic auth with username `"apikey"` and the
+    /// key as the password, per LabKey convention.
     ApiKey(
         /// The API key string.
         String,
@@ -147,7 +147,7 @@ fn home_dir() -> Option<std::path::PathBuf> {
 /// ```
 #[non_exhaustive]
 pub struct ClientConfig {
-    /// The base URL of the `LabKey` server (e.g., `"https://labkey.example.com/labkey"`).
+    /// The base URL of the LabKey server (e.g., `"https://labkey.example.com/labkey"`).
     pub base_url: String,
     /// Authentication credentials.
     pub credential: Credential,
@@ -241,7 +241,7 @@ impl HttpClientConfig {
 
 /// Percent-encode each segment of a container path individually.
 ///
-/// Container names in `LabKey` can contain spaces and special characters.
+/// Container names in LabKey can contain spaces and special characters.
 /// We split on `/`, encode each segment, and rejoin — matching the JS
 /// client's `encodePath` function in `ActionURL.ts`.
 fn encode_container_path(path: &str) -> String {
@@ -252,7 +252,7 @@ fn encode_container_path(path: &str) -> String {
         .join("/")
 }
 
-/// Async client for the `LabKey` Server REST API.
+/// Async client for the LabKey Server REST API.
 ///
 /// Construct one via [`LabkeyClient::new`], then call endpoint methods like
 /// [`select_rows`](Self::select_rows) or [`execute_sql`](Self::execute_sql).
@@ -317,9 +317,9 @@ impl LabkeyClient {
         Ok(builder.build()?)
     }
 
-    /// Build a `LabKey` action URL.
+    /// Build a LabKey action URL.
     ///
-    /// `LabKey` URLs follow the pattern
+    /// LabKey URLs follow the pattern
     /// `{base_url}/{container_path}/{controller}-{action}` where `action`
     /// includes the extension (e.g., `"getQuery.api"`).
     ///
@@ -352,7 +352,7 @@ impl LabkeyClient {
 
     /// Apply standard headers and authentication to a request builder.
     ///
-    /// Sets `X-Requested-With: XMLHttpRequest` (which `LabKey` servers expect
+    /// Sets `X-Requested-With: XMLHttpRequest` (which LabKey servers expect
     /// on API requests), the appropriate authentication credentials, and the
     /// `X-LABKEY-CSRF` header when a CSRF token is configured.
     fn prepare_request(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
@@ -574,7 +574,7 @@ impl LabkeyClient {
     /// Check the response status and either deserialize the success body or
     /// construct an appropriate error.
     ///
-    /// `LabKey` sometimes returns HTTP 200 with a JSON body containing an
+    /// LabKey sometimes returns HTTP 200 with a JSON body containing an
     /// `"exception"` key instead of the expected response shape. Java's
     /// `Command.java` detects this and throws `CommandException`. We match
     /// that behavior: on success status codes, we read the body as text,
@@ -611,9 +611,9 @@ impl LabkeyClient {
         }
     }
 
-    /// Check whether a response body contains an embedded `LabKey` exception.
+    /// Check whether a response body contains an embedded LabKey exception.
     ///
-    /// `LabKey` sometimes returns HTTP 200 with a JSON body like
+    /// LabKey sometimes returns HTTP 200 with a JSON body like
     /// `{"exception": "Something went wrong", "exceptionClass": "..."}`.
     /// This method uses a cheap string heuristic to avoid parsing the body
     /// as [`ApiErrorBody`] on every request — only when the text contains
