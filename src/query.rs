@@ -1444,6 +1444,13 @@ pub struct QueryDetailsResponse {
 /// tells the server how to decode it.
 ///
 /// This matches the JS client's `wafEncode` function in `Utils.ts`.
+///
+/// WAF encoding must be applied whenever user-provided SQL is placed into a
+/// POST request body field. It is not needed for SQL sent as GET query
+/// parameters (those are URL-encoded by the HTTP client automatically).
+/// Currently the two POST-body SQL paths are `execute_sql` and `get_data`
+/// in SQL source mode. `validate_query` sends SQL as a query parameter so
+/// it is excluded.
 pub(crate) fn waf_encode(value: &str) -> String {
     let url_encoded = urlencoding::encode(value);
     let b64 = base64::engine::general_purpose::STANDARD.encode(url_encoded.as_bytes());

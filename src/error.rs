@@ -93,6 +93,49 @@ pub enum LabkeyError {
     Url(#[from] url::ParseError),
 }
 
+/// Server exception class for API version mismatches.
+const API_VERSION_EXCEPTION: &str = "org.labkey.api.action.ApiVersionException";
+
+impl LabkeyError {
+    /// Returns `true` when this error is a `LabKey` API version mismatch.
+    ///
+    /// The server reports version mismatches with exception class
+    /// `org.labkey.api.action.ApiVersionException`. This helper lets callers
+    /// distinguish version errors from other API failures so they can surface
+    /// clear diagnostics or retry with a different API version.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use labkey_rs::{LabkeyError, ApiErrorBody};
+    ///
+    /// let err = LabkeyError::Api {
+    ///     status: reqwest::StatusCode::BAD_REQUEST,
+    ///     body: ApiErrorBody {
+    ///         exception: Some("API version mismatch".into()),
+    ///         exception_class: Some(
+    ///             "org.labkey.api.action.ApiVersionException".into(),
+    ///         ),
+    ///         errors: vec![],
+    ///     },
+    /// };
+    /// assert!(err.is_api_version_error());
+    /// ```
+    #[must_use]
+    pub fn is_api_version_error(&self) -> bool {
+        matches!(
+            self,
+            LabkeyError::Api {
+                body: ApiErrorBody {
+                    exception_class: Some(class),
+                    ..
+                },
+                ..
+            } if class == API_VERSION_EXCEPTION
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,6 +246,86 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "HTTP 500 Internal Server Error: <html>Server Error</html>"
+        );
+    }
+
+    #[test]
+    fn is_api_version_error_returns_true_for_api_version_exception() {
+        let err = LabkeyError::Api {
+            status: reqwest::StatusCode::BAD_REQUEST,
+            body: ApiErrorBody {
+                exception: Some("API version mismatch".into()),
+                exception_class: Some(API_VERSION_EXCEPTION.into()),
+                errors: vec![],
+            },
+        };
+        assert!(err.is_api_version_error());
+    }
+
+    #[test]
+    fn is_api_version_error_returns_false_for_other_exception_class() {
+        let err = LabkeyError::Api {
+            status: reqwest::StatusCode::NOT_FOUND,
+            body: ApiErrorBody {
+                exception: Some("Not found".into()),
+                exception_class: Some("org.labkey.api.action.NotFoundException".into()),
+                errors: vec![],
+            },
+        };
+        assert!(!err.is_api_version_error());
+    }
+
+    #[test]
+    fn is_api_version_error_returns_false_when_exception_class_is_none() {
+        let err = LabkeyError::Api {
+            status: reqwest::StatusCode::BAD_REQUEST,
+            body: ApiErrorBody {
+                exception: Some("Something broke".into()),
+                exception_class: None,
+                errors: vec![],
+            },
+        };
+        assert!(!err.is_api_version_error());
+    }
+
+    #[test]
+    fn is_api_version_error_returns_false_for_non_api_variants() {
+        let err = LabkeyError::InvalidInput("bad input".into());
+        assert!(!err.is_api_version_error());
+
+        let err = LabkeyError::UnexpectedResponse {
+            status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            text: "error".into(),
+        };
+        assert!(!err.is_api_version_error());
+    }
+
+    #[test]
+    fn is_api_version_error_uses_strict_equality_not_substring() {
+        let err = LabkeyError::Api {
+            status: reqwest::StatusCode::BAD_REQUEST,
+            body: ApiErrorBody {
+                exception: Some("version".into()),
+                exception_class: Some("org.labkey.api.action.ApiVersionException ".into()),
+                errors: vec![],
+            },
+        };
+        assert!(
+            !err.is_api_version_error(),
+            "trailing whitespace should not match"
+        );
+
+        let prefix_err = LabkeyError::Api {
+            status: reqwest::StatusCode::BAD_REQUEST,
+            body: ApiErrorBody {
+                exception: Some("version".into()),
+                exception_class: Some("ApiVersionException".into()),
+                errors: vec![],
+            },
+        };
+        assert!(
+            !prefix_err.is_api_version_error(),
+            "partial class name should not match"
         );
     }
 }
