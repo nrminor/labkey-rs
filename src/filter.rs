@@ -737,6 +737,207 @@ fn parse_multi_value(value: &str, filter_type: FilterType) -> FilterValue {
     }
 }
 
+/// The JSON type of a `LabKey` column, as reported in query metadata.
+///
+/// `LabKey` uses these type strings in column metadata responses to
+/// describe the data type of a column. They determine which
+/// [`FilterType`] operators are applicable via
+/// [`filter_types_for_column_type`] and [`default_filter_for_column_type`].
+///
+/// The variants match the `JsonType` type from the JS client's `Types.ts`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum JsonColumnType {
+    /// Array/multi-value column.
+    Array,
+    /// Boolean column (`true`/`false`).
+    Boolean,
+    /// Date or date-time column.
+    Date,
+    /// Floating-point numeric column.
+    Float,
+    /// Integer numeric column.
+    Int,
+    /// Text/string column.
+    String,
+    /// Time-of-day column (no date component).
+    Time,
+}
+
+impl JsonColumnType {
+    /// Parse a `LabKey` JSON type string into a [`JsonColumnType`].
+    ///
+    /// Matching is case-insensitive, following the JS client's behavior
+    /// of calling `toLowerCase()` on the type string before lookup.
+    /// Also accepts common aliases like `"datetime"` for [`Date`](Self::Date)
+    /// and `"double"` for [`Float`](Self::Float).
+    ///
+    /// Returns `None` for unrecognized type strings.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use labkey_rs::filter::JsonColumnType;
+    ///
+    /// assert_eq!(JsonColumnType::from_type_string("int"), Some(JsonColumnType::Int));
+    /// assert_eq!(JsonColumnType::from_type_string("STRING"), Some(JsonColumnType::String));
+    /// assert_eq!(JsonColumnType::from_type_string("unknown"), None);
+    /// ```
+    #[must_use]
+    pub fn from_type_string(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "array" => Some(Self::Array),
+            "boolean" => Some(Self::Boolean),
+            "date" | "datetime" => Some(Self::Date),
+            "float" | "double" => Some(Self::Float),
+            "int" | "integer" => Some(Self::Int),
+            "string" => Some(Self::String),
+            "time" => Some(Self::Time),
+            _ => None,
+        }
+    }
+}
+
+/// Returns the applicable [`FilterType`] operators for a given column type.
+///
+/// This encodes the same domain knowledge as the JS client's
+/// `TYPES_BY_JSON_TYPE` mapping: which filter operators make sense for
+/// each data type. For example, string columns support `Contains` and
+/// `StartsWith`, while integer columns support `Between` but not
+/// `Contains`.
+///
+/// When `mv_enabled` is `true`, [`FilterType::HasMissingValue`] and
+/// [`FilterType::DoesNotHaveMissingValue`] are appended to the list,
+/// matching the JS client's `getFilterTypesForType` behavior.
+///
+/// # Examples
+///
+/// ```
+/// use labkey_rs::filter::{FilterType, JsonColumnType, filter_types_for_column_type};
+///
+/// let types = filter_types_for_column_type(JsonColumnType::Int, false);
+/// assert!(types.contains(&FilterType::Equal));
+/// assert!(types.contains(&FilterType::Between));
+/// assert!(!types.contains(&FilterType::Contains));
+/// ```
+#[must_use]
+pub fn filter_types_for_column_type(
+    column_type: JsonColumnType,
+    mv_enabled: bool,
+) -> Vec<FilterType> {
+    let mut types = match column_type {
+        JsonColumnType::Array => vec![
+            FilterType::ArrayContainsAll,
+            FilterType::ArrayContainsAny,
+            FilterType::ArrayContainsExact,
+            FilterType::ArrayContainsNone,
+            FilterType::ArrayContainsNotExact,
+            FilterType::ArrayIsEmpty,
+            FilterType::ArrayIsNotEmpty,
+        ],
+        JsonColumnType::Boolean => vec![
+            FilterType::HasAnyValue,
+            FilterType::Equal,
+            FilterType::NotEqualOrNull,
+            FilterType::IsBlank,
+            FilterType::IsNotBlank,
+        ],
+        JsonColumnType::Date => vec![
+            FilterType::DateEqual,
+            FilterType::DateNotEqual,
+            FilterType::IsBlank,
+            FilterType::IsNotBlank,
+            FilterType::DateGreaterThan,
+            FilterType::DateLessThan,
+            FilterType::DateGreaterThanOrEqual,
+            FilterType::DateLessThanOrEqual,
+        ],
+        JsonColumnType::Time => vec![
+            FilterType::Equal,
+            FilterType::NotEqualOrNull,
+            FilterType::IsBlank,
+            FilterType::IsNotBlank,
+            FilterType::GreaterThan,
+            FilterType::LessThan,
+            FilterType::GreaterThanOrEqual,
+            FilterType::LessThanOrEqual,
+            FilterType::Between,
+            FilterType::NotBetween,
+        ],
+        JsonColumnType::Float | JsonColumnType::Int => vec![
+            FilterType::HasAnyValue,
+            FilterType::Equal,
+            FilterType::NotEqualOrNull,
+            FilterType::IsBlank,
+            FilterType::IsNotBlank,
+            FilterType::GreaterThan,
+            FilterType::LessThan,
+            FilterType::GreaterThanOrEqual,
+            FilterType::LessThanOrEqual,
+            FilterType::In,
+            FilterType::NotIn,
+            FilterType::Between,
+            FilterType::NotBetween,
+        ],
+        JsonColumnType::String => vec![
+            FilterType::HasAnyValue,
+            FilterType::Equal,
+            FilterType::NotEqualOrNull,
+            FilterType::IsBlank,
+            FilterType::IsNotBlank,
+            FilterType::GreaterThan,
+            FilterType::LessThan,
+            FilterType::GreaterThanOrEqual,
+            FilterType::LessThanOrEqual,
+            FilterType::Contains,
+            FilterType::DoesNotContain,
+            FilterType::DoesNotStartWith,
+            FilterType::StartsWith,
+            FilterType::In,
+            FilterType::NotIn,
+            FilterType::ContainsOneOf,
+            FilterType::ContainsNoneOf,
+            FilterType::Between,
+            FilterType::NotBetween,
+        ],
+    };
+
+    if mv_enabled {
+        types.push(FilterType::HasMissingValue);
+        types.push(FilterType::DoesNotHaveMissingValue);
+    }
+
+    types
+}
+
+/// Returns the default [`FilterType`] for a given column type.
+///
+/// This matches the JS client's `TYPES_BY_JSON_TYPE_DEFAULT` mapping.
+/// For example, string columns default to [`FilterType::Contains`],
+/// while numeric columns default to [`FilterType::Equal`].
+///
+/// # Examples
+///
+/// ```
+/// use labkey_rs::filter::{FilterType, JsonColumnType, default_filter_for_column_type};
+///
+/// assert_eq!(default_filter_for_column_type(JsonColumnType::String), FilterType::Contains);
+/// assert_eq!(default_filter_for_column_type(JsonColumnType::Int), FilterType::Equal);
+/// assert_eq!(default_filter_for_column_type(JsonColumnType::Date), FilterType::DateEqual);
+/// ```
+#[must_use]
+pub fn default_filter_for_column_type(column_type: JsonColumnType) -> FilterType {
+    match column_type {
+        JsonColumnType::Array => FilterType::ArrayContainsAll,
+        JsonColumnType::Date => FilterType::DateEqual,
+        JsonColumnType::String => FilterType::Contains,
+        JsonColumnType::Boolean
+        | JsonColumnType::Float
+        | JsonColumnType::Int
+        | JsonColumnType::Time => FilterType::Equal,
+    }
+}
+
 /// Container filter scope for queries.
 ///
 /// Controls which containers' data is included in query results. Not all
@@ -1631,5 +1832,199 @@ mod tests {
 
         let f = Filter::new("Col", FilterType::Between, FilterValue::None);
         assert_eq!(f.filter_type(), FilterType::Between);
+    }
+
+    // ── JsonColumnType tests ────────────────────────────────────────
+
+    #[test]
+    fn json_column_type_from_type_string_case_insensitive() {
+        assert_eq!(
+            JsonColumnType::from_type_string("int"),
+            Some(JsonColumnType::Int)
+        );
+        assert_eq!(
+            JsonColumnType::from_type_string("INT"),
+            Some(JsonColumnType::Int)
+        );
+        assert_eq!(
+            JsonColumnType::from_type_string("Int"),
+            Some(JsonColumnType::Int)
+        );
+        assert_eq!(
+            JsonColumnType::from_type_string("string"),
+            Some(JsonColumnType::String)
+        );
+        assert_eq!(
+            JsonColumnType::from_type_string("STRING"),
+            Some(JsonColumnType::String)
+        );
+    }
+
+    #[test]
+    fn json_column_type_from_type_string_accepts_aliases() {
+        assert_eq!(
+            JsonColumnType::from_type_string("datetime"),
+            Some(JsonColumnType::Date)
+        );
+        assert_eq!(
+            JsonColumnType::from_type_string("double"),
+            Some(JsonColumnType::Float)
+        );
+        assert_eq!(
+            JsonColumnType::from_type_string("integer"),
+            Some(JsonColumnType::Int)
+        );
+    }
+
+    #[test]
+    fn json_column_type_from_type_string_returns_none_for_unknown() {
+        assert!(JsonColumnType::from_type_string("").is_none());
+        assert!(JsonColumnType::from_type_string("varchar").is_none());
+        assert!(JsonColumnType::from_type_string("bigint").is_none());
+    }
+
+    #[test]
+    fn json_column_type_from_type_string_covers_all_variants() {
+        let cases = [
+            ("array", JsonColumnType::Array),
+            ("boolean", JsonColumnType::Boolean),
+            ("date", JsonColumnType::Date),
+            ("float", JsonColumnType::Float),
+            ("int", JsonColumnType::Int),
+            ("string", JsonColumnType::String),
+            ("time", JsonColumnType::Time),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(
+                JsonColumnType::from_type_string(input),
+                Some(expected),
+                "from_type_string({input:?}) should return {expected:?}"
+            );
+        }
+    }
+
+    // ── filter_types_for_column_type tests ──────────────────────────
+
+    #[test]
+    fn filter_types_for_string_includes_text_operators() {
+        let types = filter_types_for_column_type(JsonColumnType::String, false);
+        assert!(types.contains(&FilterType::Contains));
+        assert!(types.contains(&FilterType::StartsWith));
+        assert!(types.contains(&FilterType::DoesNotContain));
+        assert!(types.contains(&FilterType::DoesNotStartWith));
+        assert!(types.contains(&FilterType::ContainsOneOf));
+        assert!(types.contains(&FilterType::ContainsNoneOf));
+    }
+
+    #[test]
+    fn filter_types_for_int_excludes_text_operators() {
+        let types = filter_types_for_column_type(JsonColumnType::Int, false);
+        assert!(!types.contains(&FilterType::Contains));
+        assert!(!types.contains(&FilterType::StartsWith));
+        assert!(types.contains(&FilterType::Equal));
+        assert!(types.contains(&FilterType::Between));
+        assert!(types.contains(&FilterType::In));
+    }
+
+    #[test]
+    fn filter_types_for_date_uses_date_specific_operators() {
+        let types = filter_types_for_column_type(JsonColumnType::Date, false);
+        assert!(types.contains(&FilterType::DateEqual));
+        assert!(types.contains(&FilterType::DateGreaterThan));
+        assert!(
+            !types.contains(&FilterType::Equal),
+            "date should use DateEqual, not Equal"
+        );
+    }
+
+    #[test]
+    fn filter_types_for_array_uses_array_operators() {
+        let types = filter_types_for_column_type(JsonColumnType::Array, false);
+        assert!(types.contains(&FilterType::ArrayContainsAll));
+        assert!(types.contains(&FilterType::ArrayContainsAny));
+        assert!(types.contains(&FilterType::ArrayIsEmpty));
+        assert!(!types.contains(&FilterType::Equal));
+    }
+
+    #[test]
+    fn filter_types_for_boolean_is_limited() {
+        let types = filter_types_for_column_type(JsonColumnType::Boolean, false);
+        assert!(types.contains(&FilterType::Equal));
+        assert!(types.contains(&FilterType::IsBlank));
+        assert!(!types.contains(&FilterType::GreaterThan));
+        assert!(!types.contains(&FilterType::Contains));
+    }
+
+    #[test]
+    fn filter_types_mv_enabled_appends_missing_value_operators() {
+        let without_mv = filter_types_for_column_type(JsonColumnType::Int, false);
+        let with_mv = filter_types_for_column_type(JsonColumnType::Int, true);
+        assert!(!without_mv.contains(&FilterType::HasMissingValue));
+        assert!(!without_mv.contains(&FilterType::DoesNotHaveMissingValue));
+        assert!(with_mv.contains(&FilterType::HasMissingValue));
+        assert!(with_mv.contains(&FilterType::DoesNotHaveMissingValue));
+        assert_eq!(with_mv.len(), without_mv.len() + 2);
+    }
+
+    #[test]
+    fn filter_types_float_and_int_have_same_operators() {
+        let int_types = filter_types_for_column_type(JsonColumnType::Int, false);
+        let float_types = filter_types_for_column_type(JsonColumnType::Float, false);
+        assert_eq!(int_types, float_types);
+    }
+
+    // ── default_filter_for_column_type tests ────────────────────────
+
+    #[test]
+    fn default_filter_for_column_type_matches_js_defaults() {
+        assert_eq!(
+            default_filter_for_column_type(JsonColumnType::Array),
+            FilterType::ArrayContainsAll
+        );
+        assert_eq!(
+            default_filter_for_column_type(JsonColumnType::Boolean),
+            FilterType::Equal
+        );
+        assert_eq!(
+            default_filter_for_column_type(JsonColumnType::Date),
+            FilterType::DateEqual
+        );
+        assert_eq!(
+            default_filter_for_column_type(JsonColumnType::Float),
+            FilterType::Equal
+        );
+        assert_eq!(
+            default_filter_for_column_type(JsonColumnType::Int),
+            FilterType::Equal
+        );
+        assert_eq!(
+            default_filter_for_column_type(JsonColumnType::String),
+            FilterType::Contains
+        );
+        assert_eq!(
+            default_filter_for_column_type(JsonColumnType::Time),
+            FilterType::Equal
+        );
+    }
+
+    #[test]
+    fn default_filter_is_always_in_the_types_list() {
+        let all_types = [
+            JsonColumnType::Array,
+            JsonColumnType::Boolean,
+            JsonColumnType::Date,
+            JsonColumnType::Float,
+            JsonColumnType::Int,
+            JsonColumnType::String,
+            JsonColumnType::Time,
+        ];
+        for ct in all_types {
+            let default = default_filter_for_column_type(ct);
+            let applicable = filter_types_for_column_type(ct, false);
+            assert!(
+                applicable.contains(&default),
+                "default filter {default:?} for {ct:?} should be in the applicable types list"
+            );
+        }
     }
 }
