@@ -1,4 +1,8 @@
-//! Message models and API endpoints.
+//! Message board API for sending messages within a LabKey container.
+//!
+//! LabKey containers can have message boards for threaded discussions. This
+//! module provides [`SendMessageOptions`] for posting messages with HTML or
+//! plain text content to specific recipients (users or participant groups).
 
 use serde::{Deserialize, Serialize};
 

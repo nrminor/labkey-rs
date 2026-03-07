@@ -1,4 +1,11 @@
 //! Experiment models and APIs for lineage, batch, run, and sequence operations.
+//!
+//! LabKey's experiment framework tracks data provenance through a graph of runs,
+//! data objects, and materials. This module provides types for those entities
+//! ([`Run`], [`RunGroup`], [`ExpData`], [`Material`], [`ExpObject`]) and
+//! endpoints for querying lineage, managing run groups, and working with entity
+//! sequences. The lineage endpoints return a graph of [`LineageNode`] objects
+//! that describe parent/child relationships between experiment objects.
 
 use std::{collections::HashMap, time::Duration};
 

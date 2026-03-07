@@ -1,4 +1,9 @@
-//! Participant group models and API endpoints.
+//! Participant group session management for LabKey studies.
+//!
+//! Participant groups define subsets of study participants for analysis. This
+//! module provides [`UpdateParticipantGroupOptions`] for updating the session-
+//! level participant group selection, which controls which participants are
+//! visible in study views and reports.
 
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};

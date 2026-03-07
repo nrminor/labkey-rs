@@ -1,4 +1,10 @@
-//! Group-focused security endpoints.
+//! Security group management: create, delete, rename groups and manage their
+//! membership.
+//!
+//! Groups are collections of users (and other groups) that can be assigned
+//! roles in container security policies. LabKey has both project-level groups
+//! and site-level groups. See [`SystemGroups`](super::SystemGroups) for the
+//! well-known system group IDs.
 
 use serde::{Deserialize, Serialize};
 

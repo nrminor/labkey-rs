@@ -1,4 +1,9 @@
-//! Storage models and API endpoints.
+//! Freezer storage management endpoints for physical sample locations.
+//!
+//! LabKey's storage module tracks where physical samples are stored — freezers,
+//! shelves, boxes, and individual positions. This module provides endpoints for
+//! creating, updating, and deleting storage items of various types (see
+//! [`StorageType`]).
 
 use serde::{Deserialize, Serialize};
 

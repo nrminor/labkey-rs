@@ -1,4 +1,9 @@
-//! Container-focused security endpoints.
+//! Container management endpoints: create, delete, rename, move, and query
+//! projects and folders.
+//!
+//! Containers are LabKey's organizational hierarchy — the server has a root,
+//! which contains projects, which contain folders. These endpoints manage that
+//! hierarchy and query container metadata like folder types and installed modules.
 
 use std::collections::HashMap;
 

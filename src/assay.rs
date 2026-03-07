@@ -1,4 +1,13 @@
-//! Assay models and API endpoints for assay listing and `NAb` queries.
+//! Assay models and API endpoints for assay listing, batch/run management,
+//! and NAb (Neutralizing Antibody) study queries.
+//!
+//! Assays in LabKey are organized into a hierarchy: an assay design (protocol)
+//! contains batches, and each batch contains runs. This module provides endpoints
+//! for listing assay designs, fetching and saving batches and runs, importing
+//! run data, and querying NAb-specific study results.
+//!
+//! Most endpoints accept either a protocol ID or name via [`ProtocolIdentifier`].
+//! Batch operations use the [`BatchIdentifier`] enum similarly.
 
 use std::{collections::HashMap, time::Duration};
 

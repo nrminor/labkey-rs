@@ -148,20 +148,24 @@ Both filters and sorts are passed to query methods through their options builder
 All client methods return `Result<T, LabkeyError>`. The error type covers network failures, structured API errors, deserialization problems, and unexpected responses:
 
 ```rust,no_run
-use labkey_rs::LabkeyError;
-# async fn example(client: labkey_rs::LabkeyClient) {
+use labkey_rs::{LabkeyClient, LabkeyError};
+use labkey_rs::query::SelectRowsOptions;
 
-match client.select_rows(/* ... */
-#   labkey_rs::query::SelectRowsOptions::builder()
-#       .schema_name("core").query_name("Users").build(),
-).await {
-    Ok(response) => println!("{} rows", response.row_count.unwrap_or(0)),
-    Err(LabkeyError::Api { status, body }) => {
-        eprintln!("Server error ({}): {:?}", status, body.exception);
+async fn handle_query(client: &LabkeyClient) -> Result<(), LabkeyError> {
+    let options = SelectRowsOptions::builder()
+        .schema_name("core")
+        .query_name("Users")
+        .build();
+
+    match client.select_rows(options).await {
+        Ok(response) => println!("{} rows", response.row_count.unwrap_or(0)),
+        Err(LabkeyError::Api { status, body }) => {
+            eprintln!("Server error ({}): {:?}", status, body.exception);
+        }
+        Err(e) => eprintln!("Other error: {e}"),
     }
-    Err(e) => eprintln!("Other error: {e}"),
+    Ok(())
 }
-# }
 ```
 
 LabKey sometimes returns HTTP 200 with an embedded exception in the JSON body instead of a proper error status code. The client detects this and returns `LabkeyError::Api` rather than a confusing deserialization error.

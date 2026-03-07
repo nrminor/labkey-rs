@@ -1,4 +1,10 @@
-//! Visualization models and API endpoints.
+//! Saved visualization and chart configuration endpoints.
+//!
+//! LabKey supports server-side saved visualizations (charts, plots, custom
+//! views) that can be shared across users. This module provides endpoints for
+//! getting and saving visualizations, fetching visualization data, and querying
+//! the available measures, dimensions, and dimension values for a given schema
+//! and query.
 
 use std::collections::{BTreeMap, HashMap};
 

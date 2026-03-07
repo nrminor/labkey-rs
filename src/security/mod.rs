@@ -1,4 +1,15 @@
-//! Security module scaffolding and shared response vocabulary.
+//! Users, groups, containers, permissions, policies, and session management.
+//!
+//! LabKey's security model is container-based: every project and folder is a
+//! container with its own permission policy. Policies assign roles (Reader,
+//! Editor, Admin, etc.) to principals (users and groups). This module is split
+//! into submodules by concern — containers, groups, users, permissions, policies,
+//! and sessions — with shared response types (like [`Container`], [`User`], and
+//! [`Policy`]) and well-known constants (like [`PermissionTypes`] and
+//! [`PermissionRoles`]).
+//!
+//! All types are re-exported at this level, so callers can use
+//! `labkey_rs::security::GetContainersOptions` without reaching into submodules.
 
 mod constants;
 mod container;

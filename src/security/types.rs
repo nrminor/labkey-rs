@@ -1,4 +1,11 @@
-//! Shared security response models used by LabKey security endpoints.
+//! Shared security response models used across LabKey security endpoints.
+//!
+//! These types appear in responses from multiple security submodules.
+//! [`Container`] and [`ContainerHierarchy`] describe the project/folder
+//! structure. [`User`] and [`Group`] represent principals. [`Role`],
+//! [`Policy`], and [`PolicyAssignment`] describe the permission model.
+//! [`SecurableResource`] represents items that can have their own security
+//! policies.
 
 use serde::{Deserialize, Serialize};
 

@@ -1,4 +1,9 @@
-//! Report models and API endpoints.
+//! Report session management and execution endpoints.
+//!
+//! LabKey reports are server-side computations (R scripts, SQL queries, etc.)
+//! that run within a session context. This module provides endpoints for
+//! creating and deleting report sessions, executing reports and individual
+//! report functions, and listing active sessions.
 
 use std::collections::{BTreeMap, HashMap};
 

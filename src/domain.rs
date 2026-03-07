@@ -1,4 +1,11 @@
 //! Domain models and property-controller endpoints.
+//!
+//! A "domain" in LabKey is the schema definition behind a list, dataset, sample
+//! type, or other structured data source. It consists of a [`DomainDesign`]
+//! containing [`DomainField`] definitions, optional indices, and conditional
+//! formatting rules. This module provides endpoints for creating, reading,
+//! updating, and deleting domains, as well as querying property usages and
+//! validating name expressions.
 
 use std::{collections::HashMap, time::Duration};
 

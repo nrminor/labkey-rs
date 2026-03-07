@@ -1,4 +1,10 @@
-//! Session and impersonation security endpoints.
+//! Session lifecycle and user impersonation endpoints.
+//!
+//! These endpoints manage the authenticated session: logging out, querying the
+//! current user identity ([`WhoAmIResponse`]), deleting user accounts, and
+//! impersonating other users or roles for testing and administration. The
+//! impersonation endpoints let admins temporarily assume another user's identity
+//! or a specific role to verify permission configurations.
 
 use std::collections::HashMap;
 

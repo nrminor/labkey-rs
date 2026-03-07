@@ -1,4 +1,9 @@
-//! Policy-focused security endpoints.
+//! Security policy endpoints for reading and writing container permission
+//! assignments.
+//!
+//! A security policy maps roles to principals (users and groups) within a
+//! container. These endpoints let you get the current policy, save a modified
+//! one, or delete a policy to revert a container to inheriting from its parent.
 
 use std::collections::HashMap;
 

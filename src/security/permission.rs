@@ -1,4 +1,12 @@
-//! Permission-focused security endpoints.
+//! Permission query endpoints for inspecting effective permissions on users
+//! and groups.
+//!
+//! These endpoints answer questions like "what can this user do in this
+//! container?" and "what roles exist on this server?" They complement the
+//! policy endpoints, which *set* permissions, while these *read* them. See
+//! [`PermissionTypes`](super::PermissionTypes) and
+//! [`PermissionRoles`](super::PermissionRoles) for the well-known permission
+//! and role string constants.
 
 use std::collections::HashMap;
 

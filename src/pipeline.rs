@@ -1,4 +1,9 @@
-//! Pipeline models and API endpoints.
+//! Data pipeline endpoints for monitoring and triggering analysis jobs.
+//!
+//! LabKey's pipeline system manages background analysis jobs — file processing,
+//! data transforms, and protocol-driven analyses. This module provides endpoints
+//! for checking pipeline container configuration, querying file status, listing
+//! available analysis protocols, and starting new analysis jobs.
 
 use std::time::Duration;
 

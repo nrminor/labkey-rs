@@ -1,4 +1,10 @@
-//! Specimen models and API endpoints.
+//! Specimen repository and request management endpoints.
+//!
+//! LabKey's specimen module tracks physical specimens (blood draws, tissue
+//! samples, etc.) across repositories and manages specimen requests between
+//! providing locations. This module provides endpoints for browsing repositories,
+//! looking up vials by ID or row ID, managing specimen requests (create, cancel,
+//! add/remove vials), and querying providing locations and vial type summaries.
 
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};

@@ -1,4 +1,10 @@
-//! List convenience API built on domain creation.
+//! List creation convenience API built on domain creation.
+//!
+//! LabKey lists are simple tabular data stores with a primary key. Under the
+//! hood, creating a list means creating a domain with the right kind and key
+//! type. This module provides [`CreateListOptions`] with shorthand fields
+//! (`description`, `fields`, `indices`) so callers can create simple lists
+//! without constructing a full [`DomainDesign`].
 
 use std::{collections::HashMap, time::Duration};
 

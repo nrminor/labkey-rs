@@ -1,4 +1,7 @@
 //! Shared types reused across multiple API modules.
+//!
+//! Currently contains [`AuditBehavior`], which controls how LabKey records
+//! audit details for write operations like row inserts, updates, and deletes.
 
 use crate::filter::ContainerFilter;
 

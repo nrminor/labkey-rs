@@ -1,4 +1,9 @@
-//! User-focused security endpoints.
+//! User account management and lookup endpoints.
+//!
+//! These endpoints create new user accounts, verify login status, and query
+//! user lists with optional permission filtering. User creation sends an
+//! invitation email by default; use [`CreateNewUserOptions`] to control this
+//! behavior.
 
 use serde::{Deserialize, Serialize};
 
