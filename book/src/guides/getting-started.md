@@ -130,4 +130,4 @@ Now that you can connect and query, here are some directions to explore:
 - **[Querying Data](./querying-data.md)** — `select_rows` in depth, plus `execute_sql` and schema introspection
 - **[Filters and Sorts](./filters-and-sorts.md)** — narrow your queries with filter operators and sort specifications
 - **[Modifying Data](./modifying-data.md)** — insert, update, and delete rows
-- **[Module Map](../reference/module-map.md)** — find the right method for what you're trying to do
+- **[Controller-to-module map](../introduction.md#controller-to-module-map)** — find the right module for a LabKey controller

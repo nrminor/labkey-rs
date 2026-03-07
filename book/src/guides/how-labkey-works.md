@@ -73,7 +73,7 @@ For example, a `select_rows` call to the `query` controller in the `/MyProject` 
 https://labkey.example.com/labkey/MyProject/query-selectRows.api
 ```
 
-You don't need to construct these URLs yourself — the client handles it. But understanding the pattern helps when reading server logs or debugging requests. Each module in this crate corresponds to a LabKey controller: the `query` module wraps the `query` controller, the `security` module wraps the `security` controller, and so on. The [Module Map](../reference/module-map.md) lists all of them.
+You don't need to construct these URLs yourself — the client handles it. But understanding the pattern helps when reading server logs or debugging requests. Each module in this crate corresponds to one or more LabKey controllers: the `query` module wraps the `query` controller, the `security` module wraps several controllers (`security`, `core`, `project`, `login`, etc.), and so on. The [controller-to-module map](../introduction.md#controller-to-module-map) in the introduction lists all of them.
 
 For more on the URL structure and available endpoints, see LabKey's [HTTP Interface](https://www.labkey.org/Documentation/wiki-page.view?name=remoteAPIs) documentation.
 

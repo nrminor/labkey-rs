@@ -103,8 +103,6 @@
 !/book/src/recipes/working-with-assays.md
 !/book/src/recipes/managing-lists.md
 !/book/src/recipes/security-and-permissions.md
-!/book/src/reference
-!/book/src/reference/module-map.md
 
 # === Allowed: GitHub workflows ===
 !/.github

@@ -26,8 +26,4 @@
 - [Managing Lists](./recipes/managing-lists.md)
 - [Security and Permissions](./recipes/security-and-permissions.md)
 
----
 
-# Reference
-
-- [Module Map](./reference/module-map.md)

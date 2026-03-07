@@ -16,8 +16,33 @@ The **Guides** section walks through the core concepts in a logical order: setti
 
 The **Recipes** section contains focused, self-contained solutions to common tasks like paginating through large result sets, importing data in bulk, or working with assays. Each recipe assumes you've read the getting-started guide but can otherwise be read independently.
 
-The **Reference** section provides a [Module Map](./reference/module-map.md) that shows how the crate's modules correspond to LabKey's API controllers, so you can quickly find the right method for what you're trying to do.
+For detailed API documentation — every public type, method, and field — see the [API reference on docs.rs](https://docs.rs/labkey-rs).
+
+## Controller-to-module map
+
+If you already know which LabKey controller you need, this table shows where to find it in the crate. Each crate module corresponds to one or more LabKey server controllers:
+
+| Crate module | LabKey controller(s) | What it covers |
+|---|---|---|
+| `query` | `query` | Select, insert, update, delete, truncate, import, SQL, schema introspection |
+| `filter` | — | Filter types and encoding (used by `query` methods) |
+| `sort` | — | Sort specifications (used by `query` methods) |
+| `security` | `security`, `core`, `project`, `admin`, `login`, `user` | Containers, groups, users, permissions, policies, sessions |
+| `domain` | `property` | Domain and field metadata, create/update/delete domains |
+| `list` | *(delegates to `domain`)* | List creation convenience wrapper |
+| `experiment` | `assay` | Experiment runs, batches, materials, lineage |
+| `assay` | `assay` | Assay designs, protocols, NAb, import runs |
+| `di` | `dataintegration` | ETL transform configuration and execution |
+| `pipeline` | — | Pipeline job status and analysis |
+| `report` | `reports` | Report execution, sessions, data views |
+| `message` | `announcements` | Send messages / notifications |
+| `participant_group` | `participant-group` | Study participant group management |
+| `specimen` | `specimen-api` | Specimen repository queries |
+| `storage` | `storage` | Sample storage locations |
+| `visualization` | `visualization` | Visualization saved reports |
+
+The `client`, `error`, and `common` modules provide shared infrastructure (the `LabkeyClient` struct, error types, and common enums) rather than wrapping a specific controller.
 
 ## Other resources
 
-The [API reference on docs.rs](https://docs.rs/labkey-rs) has comprehensive documentation for every public type, method, and module. The [examples directory](https://github.com/nrminor/labkey-rs/tree/main/examples) in the repository contains runnable programs that demonstrate common workflows. And the [LabKey documentation](https://www.labkey.org/Documentation/wiki-page.view?name=docs) is the authoritative source on how the server itself works.
+The [examples directory](https://github.com/nrminor/labkey-rs/tree/main/examples) in the repository contains runnable programs that demonstrate common workflows. And the [LabKey documentation](https://www.labkey.org/Documentation/wiki-page.view?name=docs) is the authoritative source on how the server itself works.
