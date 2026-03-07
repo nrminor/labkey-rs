@@ -105,6 +105,48 @@ pub struct VisualizationResponse {
         deserialize_with = "deserialize_visualization_config"
     )]
     pub visualization_config: serde_json::Value,
+    /// Whether the current user can delete this visualization.
+    #[serde(default, rename = "canDelete")]
+    pub can_delete: Option<bool>,
+    /// Whether the current user can edit this visualization.
+    #[serde(default, rename = "canEdit")]
+    pub can_edit: Option<bool>,
+    /// Whether the current user can share this visualization.
+    #[serde(default, rename = "canShare")]
+    pub can_share: Option<bool>,
+    /// User ID of the visualization creator.
+    #[serde(default, rename = "createdBy")]
+    pub created_by: Option<i64>,
+    /// Optional description of the visualization.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Whether this visualization is inheritable by child containers.
+    #[serde(default)]
+    pub inheritable: Option<bool>,
+    /// Owner ID of the visualization. Typed as [`serde_json::Value`] because
+    /// the server may return a number, string, or null.
+    #[serde(default, rename = "ownerId")]
+    pub owner_id: Option<serde_json::Value>,
+    /// Query name scoping this visualization.
+    #[serde(default, rename = "queryName")]
+    pub query_name: Option<String>,
+    /// Schema name scoping this visualization.
+    #[serde(default, rename = "schemaName")]
+    pub schema_name: Option<String>,
+    /// Server-assigned report identifier.
+    #[serde(default, rename = "reportId")]
+    pub report_id: Option<String>,
+    /// Arbitrary report properties. Typed as [`serde_json::Value`] because
+    /// the structure is server-defined and not fixed.
+    #[serde(default, rename = "reportProps")]
+    pub report_props: Option<serde_json::Value>,
+    /// Whether this visualization is shared with other users.
+    #[serde(default)]
+    pub shared: Option<bool>,
+    /// URL of the visualization thumbnail image. The wire key is
+    /// `thumbnailURL` (all-caps URL), not the camelCase `thumbnailUrl`.
+    #[serde(default, rename = "thumbnailURL")]
+    pub thumbnail_url: Option<String>,
     /// Unknown fields preserved for forward compatibility.
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
@@ -1185,6 +1227,144 @@ mod tests {
             not_success_error,
             LabkeyError::UnexpectedResponse { .. }
         ));
+    }
+
+    #[test]
+    fn visualization_response_deserializes_typed_fields_and_leaves_no_extra() {
+        let response: VisualizationResponse = serde_json::from_value(serde_json::json!({
+            "id": "vis-42",
+            "name": "Lab Dashboard",
+            "type": "scatter",
+            "visualizationConfig": "{\"axis\":\"x\"}",
+            "canDelete": true,
+            "canEdit": false,
+            "canShare": true,
+            "createdBy": 1001,
+            "description": "A test visualization",
+            "inheritable": true,
+            "ownerId": 2002,
+            "queryName": "LabResults",
+            "schemaName": "study",
+            "reportId": "db:42",
+            "reportProps": {"color": "red"},
+            "shared": false,
+            "thumbnailURL": "https://example.com/thumb.png"
+        }))
+        .expect("full visualization response should deserialize");
+
+        assert_eq!(response.id.as_deref(), Some("vis-42"));
+        assert_eq!(response.name.as_deref(), Some("Lab Dashboard"));
+        assert_eq!(response.type_.as_deref(), Some("scatter"));
+        assert_eq!(
+            response.visualization_config["axis"],
+            serde_json::json!("x")
+        );
+        assert_eq!(response.can_delete, Some(true));
+        assert_eq!(response.can_edit, Some(false));
+        assert_eq!(response.can_share, Some(true));
+        assert_eq!(response.created_by, Some(1001));
+        assert_eq!(
+            response.description.as_deref(),
+            Some("A test visualization")
+        );
+        assert_eq!(response.inheritable, Some(true));
+        assert_eq!(response.owner_id, Some(serde_json::json!(2002)));
+        assert_eq!(response.query_name.as_deref(), Some("LabResults"));
+        assert_eq!(response.schema_name.as_deref(), Some("study"));
+        assert_eq!(response.report_id.as_deref(), Some("db:42"));
+        assert_eq!(
+            response.report_props,
+            Some(serde_json::json!({"color": "red"}))
+        );
+        assert_eq!(response.shared, Some(false));
+        assert_eq!(
+            response.thumbnail_url.as_deref(),
+            Some("https://example.com/thumb.png")
+        );
+        assert!(
+            response.extra.is_empty(),
+            "extra should be empty when all known fields are typed, but found: {:?}",
+            response.extra
+        );
+    }
+
+    #[test]
+    fn visualization_response_minimal_defaults_optional_fields() {
+        let response: VisualizationResponse = serde_json::from_value(serde_json::json!({
+            "id": "vis-min",
+            "name": "Minimal"
+        }))
+        .expect("minimal visualization response should deserialize");
+
+        assert_eq!(response.id.as_deref(), Some("vis-min"));
+        assert_eq!(response.name.as_deref(), Some("Minimal"));
+        assert_eq!(response.type_, None);
+        assert_eq!(response.visualization_config, serde_json::Value::Null);
+        assert_eq!(response.can_delete, None);
+        assert_eq!(response.can_edit, None);
+        assert_eq!(response.can_share, None);
+        assert_eq!(response.created_by, None);
+        assert_eq!(response.description, None);
+        assert_eq!(response.inheritable, None);
+        assert_eq!(response.owner_id, None);
+        assert_eq!(response.query_name, None);
+        assert_eq!(response.schema_name, None);
+        assert_eq!(response.report_id, None);
+        assert_eq!(response.report_props, None);
+        assert_eq!(response.shared, None);
+        assert_eq!(response.thumbnail_url, None);
+        assert!(response.extra.is_empty());
+    }
+
+    #[test]
+    fn visualization_response_unknown_field_lands_in_extra() {
+        let response: VisualizationResponse = serde_json::from_value(serde_json::json!({
+            "id": "vis-ext",
+            "name": "WithExtra",
+            "futureField": 42,
+            "anotherUnknown": "hello"
+        }))
+        .expect("visualization response with unknown fields should deserialize");
+
+        assert_eq!(response.id.as_deref(), Some("vis-ext"));
+        assert_eq!(response.name.as_deref(), Some("WithExtra"));
+        assert_eq!(
+            response.extra.get("futureField"),
+            Some(&serde_json::json!(42))
+        );
+        assert_eq!(
+            response.extra.get("anotherUnknown"),
+            Some(&serde_json::json!("hello"))
+        );
+        assert_eq!(
+            response.extra.len(),
+            2,
+            "only unknown fields should be in extra"
+        );
+    }
+
+    #[test]
+    fn visualization_response_accepts_non_numeric_owner_id_and_complex_report_props() {
+        let response: VisualizationResponse = serde_json::from_value(serde_json::json!({
+            "id": "vis-edge",
+            "name": "EdgeCases",
+            "ownerId": "user-string-id",
+            "reportProps": {
+                "nested": {"deep": true},
+                "list": [1, 2, 3],
+                "flag": false,
+                "count": 42
+            }
+        }))
+        .expect("non-numeric ownerId and complex reportProps should deserialize");
+
+        assert_eq!(response.owner_id, Some(serde_json::json!("user-string-id")));
+        let props = response.report_props.expect("reportProps should be Some");
+        assert_eq!(props["nested"]["deep"], serde_json::json!(true));
+        assert_eq!(props["list"], serde_json::json!([1, 2, 3]));
+        assert_eq!(props["flag"], serde_json::json!(false));
+        assert_eq!(props["count"], serde_json::json!(42));
+        assert!(response.extra.is_empty());
     }
 
     #[test]
