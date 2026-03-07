@@ -1,0 +1,70 @@
+name: Book
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'book/**'
+      - 'src/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build book
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install mdbook
+        uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Build book
+        run: just book
+
+      - name: Generate sitemap
+        run: |
+          BASE_URL="https://nrminor.github.io/labkey-rs"
+          BOOK_DIR="book/build"
+          {
+            echo '<?xml version="1.0" encoding="UTF-8"?>'
+            echo '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            find "$BOOK_DIR" -name '*.html' -printf '%P\n' | sort | while read -r page; do
+              echo "  <url><loc>${BASE_URL}/${page}</loc></url>"
+            done
+            echo '</urlset>'
+          } > "${BOOK_DIR}/sitemap.xml"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: book/build
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
