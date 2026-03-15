@@ -240,8 +240,16 @@ pub struct SelectRowsResponse {
     #[serde(default)]
     pub format_version: Option<f64>,
     /// Number of rows returned.
+    ///
+    /// Defaults to 0 when absent. Some older LabKey servers omit `rowCount`
+    /// from metadata-only responses (e.g. when `showRows=none`).
+    #[serde(default)]
     pub row_count: i64,
     /// The result rows.
+    ///
+    /// Defaults to an empty vec when absent. Some older LabKey servers omit
+    /// `rows` from metadata-only responses (e.g. when `showRows=none`).
+    #[serde(default)]
     pub rows: Vec<Row>,
     /// Column metadata, if requested.
     #[serde(default)]
