@@ -114,6 +114,11 @@ pub struct Row {
 #[non_exhaustive]
 pub struct QueryColumn {
     /// Internal column name.
+    ///
+    /// Some older LabKey servers omit `name` from the metadata response. When
+    /// absent, this is derived from the first element of [`field_key`](Self::field_key)
+    /// via a post-deserialization fixup in [`QueryColumn::backfill_name`].
+    #[serde(default)]
     pub name: String,
     /// Field key (can be a string or an array for nested lookups).
     pub field_key: serde_json::Value,
@@ -159,6 +164,38 @@ pub struct QueryColumn {
     /// Whether this column is a version/timestamp field.
     #[serde(default, alias = "isVersionField")]
     pub version_field: bool,
+}
+
+impl QueryColumn {
+    /// Fills in an empty `name` from `field_key[0]` for servers that omit it.
+    ///
+    /// Some older LabKey servers do not include a `name` field in the column
+    /// metadata response. In those cases, the column name can be recovered
+    /// from the first element of `fieldKey`, which is always present.
+    pub fn backfill_name(&mut self) {
+        if self.name.is_empty() {
+            self.name = extract_name_from_field_key(&self.field_key);
+        }
+    }
+}
+
+/// Extracts a column name from a `fieldKey` JSON value.
+///
+/// `fieldKey` can be either a string (`"col"`) or an array (`["col"]`).
+/// For nested lookups the array may have multiple elements
+/// (`["Lookup", "Name"]`); we use only the first element because that
+/// matches what the `name` field would contain when the server does send
+/// it — the base column name, not the full lookup path.
+fn extract_name_from_field_key(field_key: &serde_json::Value) -> String {
+    match field_key {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(arr) => arr
+            .first()
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        _ => String::new(),
+    }
 }
 
 /// Metadata block in a query response.
@@ -1201,6 +1238,11 @@ pub struct QueryLookup {
 #[non_exhaustive]
 pub struct QueryDetailsColumn {
     /// Internal column name.
+    ///
+    /// Some older LabKey servers omit `name` from the metadata response. When
+    /// absent, this is derived from the first element of [`field_key`](Self::field_key)
+    /// via a post-deserialization fixup in [`QueryDetailsColumn::backfill_name`].
+    #[serde(default)]
     pub name: String,
     /// Field key.
     pub field_key: serde_json::Value,
@@ -1234,6 +1276,17 @@ pub struct QueryDetailsColumn {
     /// Additional server-provided fields not modeled explicitly.
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
+}
+
+impl QueryDetailsColumn {
+    /// Fills in an empty `name` from `field_key[0]` for servers that omit it.
+    ///
+    /// See [`QueryColumn::backfill_name`] for details.
+    pub fn backfill_name(&mut self) {
+        if self.name.is_empty() {
+            self.name = extract_name_from_field_key(&self.field_key);
+        }
+    }
 }
 
 /// View column entry in [`QueryView`].
@@ -1952,10 +2005,20 @@ impl LabkeyClient {
             }
         }
 
-        match method {
+        let mut response: SelectRowsResponse = match method {
             RequestMethod::Get => self.get(url, &params).await,
             RequestMethod::Post => self.post_form(url, &params).await,
+        }?;
+
+        // Some older LabKey servers omit the `name` field from column metadata.
+        // Backfill it from `fieldKey` so consumers always have a usable name.
+        if let Some(meta) = &mut response.meta_data {
+            for field in &mut meta.fields {
+                field.backfill_name();
+            }
         }
+
+        Ok(response)
     }
 
     /// Select distinct values for a query column.
@@ -2120,7 +2183,23 @@ impl LabkeyClient {
             );
         }
 
-        self.get(url, &params).await
+        let mut response: QueryDetailsResponse = self.get(url, &params).await?;
+
+        for col in &mut response.columns {
+            col.backfill_name();
+        }
+        if let Some(view) = &mut response.default_view {
+            for col in &mut view.columns {
+                col.backfill_name();
+            }
+        }
+        for view in &mut response.views {
+            for col in &mut view.fields {
+                col.backfill_name();
+            }
+        }
+
+        Ok(response)
     }
 
     /// List available queries for a schema.
@@ -3139,7 +3218,15 @@ impl LabkeyClient {
         };
 
         let url = self.build_url("query", "getData", options.container_path.as_deref());
-        self.post(url, &body).await
+        let mut response: SelectRowsResponse = self.post(url, &body).await?;
+
+        if let Some(meta) = &mut response.meta_data {
+            for field in &mut meta.fields {
+                field.backfill_name();
+            }
+        }
+
+        Ok(response)
     }
 
     /// Execute arbitrary LabKey SQL.
@@ -3220,7 +3307,15 @@ impl LabkeyClient {
             include_details_column: options.include_details_column,
         };
 
-        self.post(url, &body).await
+        let mut response: SelectRowsResponse = self.post(url, &body).await?;
+
+        if let Some(meta) = &mut response.meta_data {
+            for field in &mut meta.fields {
+                field.backfill_name();
+            }
+        }
+
+        Ok(response)
     }
 }
 
