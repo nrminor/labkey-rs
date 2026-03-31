@@ -23,6 +23,11 @@ use labkey_rs::participant_group::UpdateParticipantGroupOptions;
 use labkey_rs::pipeline::{
     GetFileStatusOptions, GetPipelineContainerOptions, GetProtocolsOptions, StartAnalysisOptions,
 };
+#[cfg(feature = "experimental")]
+use labkey_rs::query::experimental::{
+    DEFAULT_EOL as SQL_EXPERIMENTAL_DEFAULT_EOL, DEFAULT_SEP as SQL_EXPERIMENTAL_DEFAULT_SEP,
+    ExperimentalQueryExt, SqlExecuteOptions as ExperimentalSqlExecuteOptions,
+};
 use labkey_rs::query::{
     CommandType, DataViewType, DeleteQueryViewOptions, DeleteRowsOptions, ExecuteSqlOptions,
     GetDataAggregate, GetDataFilter, GetDataOptions, GetDataPivot, GetDataSource, GetDataTransform,
@@ -712,6 +717,87 @@ async fn execute_sql_sends_expected_post_request_shape() {
         .expect("request should succeed");
 
     assert_eq!(response.row_count, 0);
+}
+
+#[cfg(feature = "experimental")]
+#[tokio::test]
+async fn experimental_sql_execute_posts_expected_body_and_parses_compact_payload() {
+    let server = MockServer::start().await;
+
+    let payload = [
+        format!("meta1{SQL_EXPERIMENTAL_DEFAULT_SEP}meta2{SQL_EXPERIMENTAL_DEFAULT_SEP}meta3"),
+        format!("id{SQL_EXPERIMENTAL_DEFAULT_SEP}score{SQL_EXPERIMENTAL_DEFAULT_SEP}name"),
+        format!("INTEGER{SQL_EXPERIMENTAL_DEFAULT_SEP}DOUBLE{SQL_EXPERIMENTAL_DEFAULT_SEP}VARCHAR"),
+        format!("1{SQL_EXPERIMENTAL_DEFAULT_SEP}1.25{SQL_EXPERIMENTAL_DEFAULT_SEP}alpha"),
+        format!("\u{0008}{SQL_EXPERIMENTAL_DEFAULT_SEP}2.5{SQL_EXPERIMENTAL_DEFAULT_SEP}\u{0008}"),
+        String::new(),
+    ]
+    .join(SQL_EXPERIMENTAL_DEFAULT_EOL);
+
+    Mock::given(method("POST"))
+        .and(path("/MyProject/MyFolder/sql-execute.view"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .and(body_json(serde_json::json!({
+            "schema": "core",
+            "sql": waf_encode_for_test("SELECT id, score, name FROM core.table"),
+            "sep": SQL_EXPERIMENTAL_DEFAULT_SEP,
+            "eol": SQL_EXPERIMENTAL_DEFAULT_EOL,
+            "compact": true,
+            "parameters": {}
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_string(payload))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let response = client
+        .experimental_sql_execute(
+            ExperimentalSqlExecuteOptions::builder()
+                .schema("core".to_string())
+                .sql("SELECT id, score, name FROM core.table".to_string())
+                .build(),
+        )
+        .await
+        .expect("experimental_sql_execute should succeed");
+
+    assert_eq!(response.names, vec!["id", "score", "name"]);
+    assert_eq!(response.rows.len(), 2);
+    assert_eq!(response.rows[0][0], serde_json::json!(1));
+    assert_eq!(response.rows[0][1], serde_json::json!(1.25));
+    assert_eq!(response.rows[0][2], serde_json::json!("alpha"));
+    assert_eq!(response.rows[1][0], serde_json::json!(1));
+    assert_eq!(response.rows[1][1], serde_json::json!(2.5));
+    assert_eq!(response.rows[1][2], serde_json::json!("alpha"));
+}
+
+#[cfg(feature = "experimental")]
+#[tokio::test]
+async fn experimental_sql_execute_rejects_empty_schema_or_sql() {
+    let server = MockServer::start().await;
+    let client = test_client(&server.uri());
+
+    let empty_schema = client
+        .experimental_sql_execute(
+            ExperimentalSqlExecuteOptions::builder()
+                .schema("   ".to_string())
+                .sql("SELECT 1".to_string())
+                .build(),
+        )
+        .await
+        .expect_err("empty schema should fail");
+    assert!(matches!(empty_schema, LabkeyError::InvalidInput(_)));
+
+    let empty_sql = client
+        .experimental_sql_execute(
+            ExperimentalSqlExecuteOptions::builder()
+                .schema("core".to_string())
+                .sql("   ".to_string())
+                .build(),
+        )
+        .await
+        .expect_err("empty SQL should fail");
+    assert!(matches!(empty_sql, LabkeyError::InvalidInput(_)));
 }
 
 #[tokio::test]

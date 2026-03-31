@@ -22,6 +22,568 @@ use crate::{
 /// Prefix used by LabKey for URL-valued hidden columns.
 pub const URL_COLUMN_PREFIX: &str = "_labkeyurl_";
 
+/// Experimental query APIs that are present in upstream clients but not part
+/// of LabKey's primary documented surface.
+#[cfg(feature = "experimental")]
+#[cfg_attr(docsrs, doc(cfg(feature = "experimental")))]
+pub mod experimental {
+    use std::collections::HashMap;
+
+    use reqwest::StatusCode;
+    use serde::Serialize;
+
+    use crate::{client::LabkeyClient, error::LabkeyError};
+
+    /// Default field separator used by LabKey's experimental SQL endpoint.
+    ///
+    /// This is ASCII Unit Separator (0x1F) followed by a tab, matching both
+    /// the upstream JavaScript and Java clients.
+    pub const DEFAULT_SEP: &str = "\u{1f}\t";
+
+    /// Default row separator used by LabKey's experimental SQL endpoint.
+    ///
+    /// This is ASCII Unit Separator (0x1F) followed by a newline, matching
+    /// both the upstream JavaScript and Java clients.
+    pub const DEFAULT_EOL: &str = "\u{1f}\n";
+
+    const BACKSPACE_CHAR: &str = "\u{0008}";
+
+    /// Options for [`ExperimentalQueryExt::experimental_sql_execute`].
+    #[derive(Debug, Clone, bon::Builder)]
+    #[non_exhaustive]
+    pub struct SqlExecuteOptions {
+        /// LabKey schema to query.
+        pub schema: String,
+        /// LabKey SQL statement to execute.
+        pub sql: String,
+        /// Override the client's default container path for this request.
+        pub container_path: Option<String>,
+        /// Named parameter values for parameterized underlying queries.
+        pub parameters: Option<HashMap<String, serde_json::Value>>,
+        /// Field separator for the compact text format.
+        ///
+        /// Defaults to [`DEFAULT_SEP`].
+        pub sep: Option<String>,
+        /// Row separator for the compact text format.
+        ///
+        /// Defaults to [`DEFAULT_EOL`].
+        pub eol: Option<String>,
+        /// Whether to enable compact back-reference encoding.
+        ///
+        /// Defaults to `true`.
+        pub compact: Option<bool>,
+        /// Optional per-request timeout override.
+        pub timeout: Option<std::time::Duration>,
+    }
+
+    /// Extension trait exposing experimental query APIs on [`LabkeyClient`].
+    ///
+    /// Import this trait to call experimental methods:
+    ///
+    /// ```no_run
+    /// # async fn example() -> Result<(), labkey_rs::LabkeyError> {
+    /// # let config = labkey_rs::ClientConfig::new(
+    /// #     "https://labkey.example.com/labkey",
+    /// #     labkey_rs::Credential::ApiKey("key".into()),
+    /// #     "/",
+    /// # );
+    /// # let client = labkey_rs::LabkeyClient::new(config)?;
+    /// use labkey_rs::query::experimental::{ExperimentalQueryExt, SqlExecuteOptions};
+    ///
+    /// let _ = client
+    ///     .experimental_sql_execute(
+    ///         SqlExecuteOptions::builder()
+    ///             .schema("core")
+    ///             .sql("SELECT Name FROM core.Users")
+    ///             .build(),
+    ///     )
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub trait ExperimentalQueryExt {
+        /// Execute LabKey SQL through the experimental compact SQL endpoint.
+        ///
+        /// Sends a POST request to `sql-execute.view` and parses the compact
+        /// control-character-delimited response into typed values.
+        ///
+        /// This mirrors the upstream JavaScript and Java client behavior and is
+        /// useful for bulk export scenarios where `query-selectRows.api` overhead
+        /// is too high.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`LabkeyError`] if client-side input is invalid, the HTTP
+        /// request fails, the server returns an error response, or the compact
+        /// response cannot be parsed.
+        // JUSTIFICATION: This trait is feature-gated and explicitly marked
+        // experimental. Keeping an `async fn` preserves ergonomic call sites,
+        // and we only implement it for `LabkeyClient`.
+        #[allow(async_fn_in_trait)]
+        async fn experimental_sql_execute(
+            &self,
+            options: SqlExecuteOptions,
+        ) -> Result<SqlExecuteResponse, LabkeyError>;
+    }
+
+    /// Parsed response from `sql-execute.view`.
+    ///
+    /// The endpoint returns a compact text payload with metadata rows followed
+    /// by data rows separated by control characters. This type stores the
+    /// parsed column names, server type names, and typed row values.
+    #[derive(Debug, Clone, PartialEq)]
+    #[non_exhaustive]
+    pub struct SqlExecuteResponse {
+        /// Column names in result order.
+        pub names: Vec<String>,
+        /// Server column types in result order.
+        pub types: Vec<String>,
+        /// Parsed row values in result order.
+        pub rows: Vec<Vec<serde_json::Value>>,
+    }
+
+    /// Column-major representation of an experimental SQL response.
+    #[derive(Debug, Clone, PartialEq)]
+    #[non_exhaustive]
+    pub struct ColumnarResult {
+        /// Column names in result order.
+        pub names: Vec<String>,
+        /// Server column types in result order.
+        pub types: Vec<String>,
+        /// Column-major values; `columns[i]` corresponds to `names[i]`.
+        pub columns: Vec<Vec<serde_json::Value>>,
+    }
+
+    /// Lightweight schema descriptor for a single result column.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[non_exhaustive]
+    pub struct ColumnSchema {
+        /// Column name.
+        pub name: String,
+        /// Server SQL type name.
+        pub sql_type: String,
+        /// Zero-based column index.
+        pub index: usize,
+    }
+
+    impl SqlExecuteResponse {
+        /// Number of rows in the result.
+        #[must_use]
+        pub fn row_count(&self) -> usize {
+            self.rows.len()
+        }
+
+        /// Number of columns in the result.
+        #[must_use]
+        pub fn column_count(&self) -> usize {
+            self.names.len()
+        }
+
+        /// Return column schema in result order.
+        #[must_use]
+        pub fn schema(&self) -> Vec<ColumnSchema> {
+            self.names
+                .iter()
+                .cloned()
+                .enumerate()
+                .map(|(index, name)| ColumnSchema {
+                    sql_type: self.types.get(index).cloned().unwrap_or_default(),
+                    name,
+                    index,
+                })
+                .collect()
+        }
+
+        /// Iterate over rows as slices in row-major order.
+        pub fn iter_rows(&self) -> impl Iterator<Item = &[serde_json::Value]> {
+            self.rows.iter().map(Vec::as_slice)
+        }
+
+        /// Convert row-major data into a column-major layout.
+        #[must_use]
+        pub fn into_columns(self) -> ColumnarResult {
+            let mut columns: Vec<Vec<serde_json::Value>> = self
+                .names
+                .iter()
+                .map(|_| Vec::with_capacity(self.rows.len()))
+                .collect();
+
+            for row in self.rows {
+                for (index, column) in columns.iter_mut().enumerate() {
+                    column.push(row.get(index).cloned().unwrap_or(serde_json::Value::Null));
+                }
+            }
+
+            ColumnarResult {
+                names: self.names,
+                types: self.types,
+                columns,
+            }
+        }
+
+        /// Return the zero-based index for a named column.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`LabkeyError::InvalidInput`] when the column is not
+        /// present in the response.
+        pub fn column_index(&self, name: &str) -> Result<usize, LabkeyError> {
+            self.names
+                .iter()
+                .position(|candidate| candidate == name)
+                .ok_or(LabkeyError::InvalidInput(format!(
+                    "column '{name}' not found in SQL response"
+                )))
+        }
+
+        /// Return column values by name as optional references.
+        ///
+        /// Missing row cells or explicit `null` values become `None`.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`LabkeyError::InvalidInput`] when the column name is not
+        /// present in the response.
+        pub fn column_values(
+            &self,
+            name: &str,
+        ) -> Result<Vec<Option<&serde_json::Value>>, LabkeyError> {
+            let index = self.column_index(name)?;
+            Ok(self
+                .rows
+                .iter()
+                .map(|row| {
+                    row.get(index)
+                        .and_then(|value| (!value.is_null()).then_some(value))
+                })
+                .collect())
+        }
+
+        /// Extract a named column as optional `i64` values.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`LabkeyError::InvalidInput`] when the column is absent or
+        /// a non-null value cannot be interpreted as `i64`.
+        pub fn column_i64(&self, name: &str) -> Result<Vec<Option<i64>>, LabkeyError> {
+            let values = self.column_values(name)?;
+            let mut out = Vec::with_capacity(values.len());
+
+            for (row_index, value) in values.into_iter().enumerate() {
+                let parsed = match value {
+                    None => None,
+                    Some(serde_json::Value::Number(number)) => number.as_i64(),
+                    Some(serde_json::Value::String(s)) => s.parse::<i64>().ok(),
+                    Some(other) => {
+                        return Err(type_mismatch(name, row_index, "i64-compatible", other));
+                    }
+                };
+                if value.is_some() && parsed.is_none() {
+                    return Err(LabkeyError::InvalidInput(format!(
+                        "column '{name}', row {row_index}: value is not i64-compatible"
+                    )));
+                }
+                out.push(parsed);
+            }
+
+            Ok(out)
+        }
+
+        /// Extract a named column as optional `f64` values.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`LabkeyError::InvalidInput`] when the column is absent or
+        /// a non-null value cannot be interpreted as `f64`.
+        pub fn column_f64(&self, name: &str) -> Result<Vec<Option<f64>>, LabkeyError> {
+            let values = self.column_values(name)?;
+            let mut out = Vec::with_capacity(values.len());
+
+            for (row_index, value) in values.into_iter().enumerate() {
+                let parsed = match value {
+                    None => None,
+                    Some(serde_json::Value::Number(number)) => number.as_f64(),
+                    Some(serde_json::Value::String(s)) => s.parse::<f64>().ok(),
+                    Some(other) => {
+                        return Err(type_mismatch(name, row_index, "f64-compatible", other));
+                    }
+                };
+                if value.is_some() && parsed.is_none() {
+                    return Err(LabkeyError::InvalidInput(format!(
+                        "column '{name}', row {row_index}: value is not f64-compatible"
+                    )));
+                }
+                out.push(parsed);
+            }
+
+            Ok(out)
+        }
+
+        /// Extract a named column as optional `bool` values.
+        ///
+        /// Accepts `true`/`false`, `1`/`0`, and case-insensitive string
+        /// variants of those values.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`LabkeyError::InvalidInput`] when the column is absent or
+        /// a non-null value cannot be interpreted as `bool`.
+        pub fn column_bool(&self, name: &str) -> Result<Vec<Option<bool>>, LabkeyError> {
+            let values = self.column_values(name)?;
+            let mut out = Vec::with_capacity(values.len());
+
+            for (row_index, value) in values.into_iter().enumerate() {
+                let parsed = match value {
+                    None => None,
+                    Some(serde_json::Value::Bool(b)) => Some(*b),
+                    Some(serde_json::Value::Number(number)) => match number.as_i64() {
+                        Some(0) => Some(false),
+                        Some(1) => Some(true),
+                        _ => None,
+                    },
+                    Some(serde_json::Value::String(s)) => {
+                        let trimmed = s.trim();
+                        if trimmed.eq_ignore_ascii_case("true") || trimmed == "1" {
+                            Some(true)
+                        } else if trimmed.eq_ignore_ascii_case("false") || trimmed == "0" {
+                            Some(false)
+                        } else {
+                            None
+                        }
+                    }
+                    Some(other) => {
+                        return Err(type_mismatch(name, row_index, "bool-compatible", other));
+                    }
+                };
+                if value.is_some() && parsed.is_none() {
+                    return Err(LabkeyError::InvalidInput(format!(
+                        "column '{name}', row {row_index}: value is not bool-compatible"
+                    )));
+                }
+                out.push(parsed);
+            }
+
+            Ok(out)
+        }
+
+        /// Extract a named column as optional string slices.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`LabkeyError::InvalidInput`] when the column is absent or
+        /// a non-null value is not a JSON string.
+        pub fn column_str<'a>(&'a self, name: &str) -> Result<Vec<Option<&'a str>>, LabkeyError> {
+            let values = self.column_values(name)?;
+            let mut out = Vec::with_capacity(values.len());
+
+            for (row_index, value) in values.into_iter().enumerate() {
+                let parsed = match value {
+                    None => None,
+                    Some(serde_json::Value::String(s)) => Some(s.as_str()),
+                    Some(other) => {
+                        return Err(type_mismatch(name, row_index, "string", other));
+                    }
+                };
+                out.push(parsed);
+            }
+
+            Ok(out)
+        }
+
+        /// Convert row arrays into a vector of objects keyed by column name.
+        #[must_use]
+        pub fn as_objects(&self) -> Vec<HashMap<String, serde_json::Value>> {
+            let mut result = Vec::with_capacity(self.rows.len());
+            for row in &self.rows {
+                let mut object = self
+                    .names
+                    .iter()
+                    .cloned()
+                    .map(|name| (name, serde_json::Value::Null))
+                    .collect::<HashMap<_, _>>();
+
+                let limit = std::cmp::min(self.names.len(), row.len());
+                for (index, value) in row.iter().enumerate().take(limit) {
+                    object.insert(self.names[index].clone(), value.clone());
+                }
+                result.push(object);
+            }
+            result
+        }
+    }
+
+    fn type_mismatch(
+        column: &str,
+        row_index: usize,
+        expected: &str,
+        actual: &serde_json::Value,
+    ) -> LabkeyError {
+        LabkeyError::InvalidInput(format!(
+            "column '{column}', row {row_index}: expected {expected}, found {}",
+            value_kind(actual)
+        ))
+    }
+
+    fn value_kind(value: &serde_json::Value) -> &'static str {
+        match value {
+            serde_json::Value::Null => "null",
+            serde_json::Value::Bool(_) => "bool",
+            serde_json::Value::Number(_) => "number",
+            serde_json::Value::String(_) => "string",
+            serde_json::Value::Array(_) => "array",
+            serde_json::Value::Object(_) => "object",
+        }
+    }
+
+    #[derive(Serialize)]
+    pub(crate) struct SqlExecuteBody {
+        pub(crate) schema: String,
+        pub(crate) sql: String,
+        pub(crate) sep: String,
+        pub(crate) eol: String,
+        pub(crate) compact: bool,
+        pub(crate) parameters: HashMap<String, serde_json::Value>,
+    }
+
+    /// Parse a `sql-execute.view` compact payload into structured rows.
+    ///
+    /// This mirrors the upstream JS parser behavior: trailing empty line
+    /// removal, metadata-row skipping based on the first row width, compact
+    /// backspace references, and best-effort primitive type coercion.
+    ///
+    /// `TIMESTAMP` values are returned as strings for maximal fidelity without
+    /// imposing a date-time crate dependency.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabkeyError::UnexpectedResponse`] if the payload does not
+    /// contain the expected metadata/name/type header structure.
+    pub fn parse_rows(text: &str, sep: &str, eol: &str) -> Result<SqlExecuteResponse, LabkeyError> {
+        let mut lines: Vec<&str> = text.split(eol).collect();
+        if lines.last().is_some_and(|line| line.trim_end().is_empty()) {
+            lines.pop();
+        }
+
+        if lines.len() < 3 {
+            return Err(parse_error(text));
+        }
+
+        let metadata = lines[0].split(sep).collect::<Vec<_>>();
+        let names = lines[1].split(sep).map(String::from).collect::<Vec<_>>();
+        let types = lines[2].split(sep).map(String::from).collect::<Vec<_>>();
+
+        if metadata.len() > lines.len() {
+            return Err(parse_error(text));
+        }
+
+        let mut parsed_rows: Vec<Vec<serde_json::Value>> = Vec::new();
+        for line in lines.into_iter().skip(metadata.len()) {
+            let mut parsed_row: Vec<serde_json::Value> = Vec::new();
+            let parts = line.split(sep).collect::<Vec<_>>();
+
+            for (column_index, value) in parts.iter().enumerate() {
+                if value.is_empty() {
+                    parsed_row.push(serde_json::Value::Null);
+                    continue;
+                }
+
+                if *value == BACKSPACE_CHAR && !parsed_rows.is_empty() {
+                    let previous_value = parsed_rows
+                        .last()
+                        .and_then(|row| row.get(column_index))
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
+                    parsed_row.push(previous_value);
+                    continue;
+                }
+
+                let sql_type = types.get(column_index).map(String::as_str);
+                parsed_row.push(convert_value(sql_type, value));
+            }
+
+            parsed_rows.push(parsed_row);
+        }
+
+        Ok(SqlExecuteResponse {
+            names,
+            types,
+            rows: parsed_rows,
+        })
+    }
+
+    fn parse_error(text: &str) -> LabkeyError {
+        LabkeyError::UnexpectedResponse {
+            status: StatusCode::OK,
+            text: text.to_string(),
+        }
+    }
+
+    fn convert_value(sql_type: Option<&str>, value: &str) -> serde_json::Value {
+        match sql_type {
+            Some("BIGINT" | "BOOLEAN" | "INTEGER" | "SMALLINT" | "TINYINT") => {
+                value.parse::<i64>().map_or_else(
+                    |_| serde_json::Value::String(value.to_string()),
+                    |parsed| serde_json::Value::Number(parsed.into()),
+                )
+            }
+            Some("DOUBLE" | "NUMERIC" | "REAL") => value.parse::<f64>().map_or_else(
+                |_| serde_json::Value::String(value.to_string()),
+                |parsed| {
+                    serde_json::Number::from_f64(parsed).map_or_else(
+                        || serde_json::Value::String(value.to_string()),
+                        serde_json::Value::Number,
+                    )
+                },
+            ),
+            _ => serde_json::Value::String(value.to_string()),
+        }
+    }
+
+    impl ExperimentalQueryExt for LabkeyClient {
+        async fn experimental_sql_execute(
+            &self,
+            options: SqlExecuteOptions,
+        ) -> Result<SqlExecuteResponse, LabkeyError> {
+            if options.schema.trim().is_empty() {
+                return Err(LabkeyError::InvalidInput(
+                    "schema is required for sql-execute.view".to_string(),
+                ));
+            }
+            if options.sql.trim().is_empty() {
+                return Err(LabkeyError::InvalidInput(
+                    "sql is required for sql-execute.view".to_string(),
+                ));
+            }
+
+            let sep = options.sep.unwrap_or_else(|| DEFAULT_SEP.to_string());
+            let eol = options.eol.unwrap_or_else(|| DEFAULT_EOL.to_string());
+            let compact = options.compact.unwrap_or(true);
+            let parameters = options.parameters.unwrap_or_default();
+
+            let body = SqlExecuteBody {
+                schema: options.schema,
+                sql: super::waf_encode(&options.sql),
+                sep: sep.clone(),
+                eol: eol.clone(),
+                compact,
+                parameters,
+            };
+
+            let request_options = crate::client::RequestOptions {
+                timeout: options.timeout,
+                ..Default::default()
+            };
+
+            let url = self.build_url("sql", "execute.view", options.container_path.as_deref());
+            let payload = self
+                .post_text_with_options(url, &body, &request_options)
+                .await?;
+
+            parse_rows(&payload, &sep, &eol)
+        }
+    }
+}
+
 /// HTTP method for query read endpoints like [`LabkeyClient::select_rows`].
 ///
 /// Defaults to [`Get`](RequestMethod::Get). The `Post` variant sends parameters
@@ -4923,5 +5485,163 @@ mod tests {
             .column("Name".to_string())
             .build();
         assert!(opts.method.is_none());
+    }
+
+    #[cfg(feature = "experimental")]
+    #[test]
+    fn experimental_sql_parse_rows_handles_compact_backrefs_and_typed_values() {
+        let sep = experimental::DEFAULT_SEP;
+        let eol = experimental::DEFAULT_EOL;
+        let payload = [
+            format!("meta1{sep}meta2{sep}meta3"),
+            format!("id{sep}score{sep}name"),
+            format!("INTEGER{sep}DOUBLE{sep}VARCHAR"),
+            format!("1{sep}1.5{sep}alpha"),
+            format!("\u{0008}{sep}2.75{sep}\u{0008}"),
+            String::new(),
+        ]
+        .join(eol);
+
+        let parsed = experimental::parse_rows(&payload, sep, eol).expect("should parse");
+
+        assert_eq!(parsed.names, vec!["id", "score", "name"]);
+        assert_eq!(parsed.types, vec!["INTEGER", "DOUBLE", "VARCHAR"]);
+        assert_eq!(parsed.rows.len(), 2);
+        assert_eq!(parsed.rows[0][0], serde_json::json!(1));
+        assert_eq!(parsed.rows[0][1], serde_json::json!(1.5));
+        assert_eq!(parsed.rows[0][2], serde_json::json!("alpha"));
+        assert_eq!(parsed.rows[1][0], serde_json::json!(1));
+        assert_eq!(parsed.rows[1][1], serde_json::json!(2.75));
+        assert_eq!(parsed.rows[1][2], serde_json::json!("alpha"));
+    }
+
+    #[cfg(feature = "experimental")]
+    #[test]
+    fn experimental_sql_as_objects_maps_columns_and_fills_missing_values_with_null() {
+        let response = experimental::SqlExecuteResponse {
+            names: vec!["a".to_string(), "b".to_string()],
+            types: vec!["INTEGER".to_string(), "VARCHAR".to_string()],
+            rows: vec![vec![serde_json::json!(1)]],
+        };
+
+        let objects = response.as_objects();
+        assert_eq!(objects.len(), 1);
+        assert_eq!(objects[0]["a"], serde_json::json!(1));
+        assert_eq!(objects[0]["b"], serde_json::Value::Null);
+    }
+
+    #[cfg(feature = "experimental")]
+    #[test]
+    fn experimental_sql_body_defaults_match_upstream_clients() {
+        let body = experimental::SqlExecuteBody {
+            schema: "core".to_string(),
+            sql: waf_encode("SELECT * FROM core.Users"),
+            sep: experimental::DEFAULT_SEP.to_string(),
+            eol: experimental::DEFAULT_EOL.to_string(),
+            compact: true,
+            parameters: HashMap::new(),
+        };
+
+        let serialized = serde_json::to_value(&body).expect("should serialize");
+        assert_eq!(serialized["schema"], "core");
+        assert_eq!(
+            serialized["sql"],
+            serde_json::Value::String(waf_encode("SELECT * FROM core.Users"))
+        );
+        assert_eq!(serialized["sep"], experimental::DEFAULT_SEP);
+        assert_eq!(serialized["eol"], experimental::DEFAULT_EOL);
+        assert_eq!(serialized["compact"], true);
+        assert_eq!(serialized["parameters"], serde_json::json!({}));
+    }
+
+    #[cfg(feature = "experimental")]
+    #[test]
+    fn experimental_sql_into_columns_transposes_rows() {
+        let response = experimental::SqlExecuteResponse {
+            names: vec!["a".to_string(), "b".to_string()],
+            types: vec!["INTEGER".to_string(), "VARCHAR".to_string()],
+            rows: vec![
+                vec![serde_json::json!(1), serde_json::json!("x")],
+                vec![serde_json::json!(2), serde_json::Value::Null],
+            ],
+        };
+
+        let columnar = response.into_columns();
+        assert_eq!(columnar.names, vec!["a", "b"]);
+        assert_eq!(columnar.types, vec!["INTEGER", "VARCHAR"]);
+        assert_eq!(columnar.columns.len(), 2);
+        assert_eq!(
+            columnar.columns[0],
+            vec![serde_json::json!(1), serde_json::json!(2)]
+        );
+        assert_eq!(
+            columnar.columns[1],
+            vec![serde_json::json!("x"), serde_json::Value::Null]
+        );
+    }
+
+    #[cfg(feature = "experimental")]
+    #[test]
+    fn experimental_sql_column_extractors_handle_typed_and_null_values() {
+        let response = experimental::SqlExecuteResponse {
+            names: vec![
+                "id".to_string(),
+                "score".to_string(),
+                "flag".to_string(),
+                "name".to_string(),
+            ],
+            types: vec![
+                "INTEGER".to_string(),
+                "DOUBLE".to_string(),
+                "BOOLEAN".to_string(),
+                "VARCHAR".to_string(),
+            ],
+            rows: vec![
+                vec![
+                    serde_json::json!(1),
+                    serde_json::json!(1.5),
+                    serde_json::json!(1),
+                    serde_json::json!("alice"),
+                ],
+                vec![
+                    serde_json::Value::Null,
+                    serde_json::json!("2.75"),
+                    serde_json::json!("false"),
+                    serde_json::Value::Null,
+                ],
+            ],
+        };
+
+        assert_eq!(
+            response.column_i64("id").expect("id should parse"),
+            vec![Some(1), None]
+        );
+        assert_eq!(
+            response.column_f64("score").expect("score should parse"),
+            vec![Some(1.5), Some(2.75)]
+        );
+        assert_eq!(
+            response.column_bool("flag").expect("flag should parse"),
+            vec![Some(true), Some(false)]
+        );
+        assert_eq!(
+            response.column_str("name").expect("name should parse"),
+            vec![Some("alice"), None]
+        );
+    }
+
+    #[cfg(feature = "experimental")]
+    #[test]
+    fn experimental_sql_column_extractors_report_type_mismatch() {
+        let response = experimental::SqlExecuteResponse {
+            names: vec!["name".to_string()],
+            types: vec!["VARCHAR".to_string()],
+            rows: vec![vec![serde_json::json!(42)]],
+        };
+
+        let error = response
+            .column_str("name")
+            .expect_err("column_str should reject numeric values");
+        assert!(matches!(error, LabkeyError::InvalidInput(_)));
     }
 }

@@ -502,6 +502,21 @@ impl LabkeyClient {
             .await
     }
 
+    /// Send a POST request with a JSON body and request options,
+    /// returning the raw text response body.
+    pub(crate) async fn post_text_with_options<B: serde::Serialize>(
+        &self,
+        url: Url,
+        body: &B,
+        options: &RequestOptions,
+    ) -> Result<String, LabkeyError> {
+        let client = self.client_for_options(options)?;
+        let request = self.build_json_post_request(&client, url, body, options)?;
+        let response = client.execute(request).await?;
+        self.handle_text_response(response, &options.accepted_statuses)
+            .await
+    }
+
     /// Send a POST request with form-encoded key-value pairs and deserialize
     /// the JSON response.
     ///
@@ -647,6 +662,33 @@ impl LabkeyClient {
                 });
             }
             Ok(())
+        } else {
+            match serde_json::from_str::<ApiErrorBody>(&text) {
+                Ok(api_error) => Err(LabkeyError::Api {
+                    status,
+                    body: api_error,
+                }),
+                Err(_) => Err(LabkeyError::UnexpectedResponse { status, text }),
+            }
+        }
+    }
+
+    async fn handle_text_response(
+        &self,
+        response: reqwest::Response,
+        accepted_statuses: &[StatusCode],
+    ) -> Result<String, LabkeyError> {
+        let status = response.status();
+        let text = response.text().await?;
+
+        if status.is_success() || accepted_statuses.contains(&status) {
+            if let Some(api_error) = Self::check_for_embedded_exception(&text) {
+                return Err(LabkeyError::Api {
+                    status,
+                    body: api_error,
+                });
+            }
+            Ok(text)
         } else {
             match serde_json::from_str::<ApiErrorBody>(&text) {
                 Ok(api_error) => Err(LabkeyError::Api {

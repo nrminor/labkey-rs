@@ -3,7 +3,7 @@
   "default_agent": "build",
   "agent": {
     "build": {
-      "model": "anthropic/claude-opus-4-6"
+      "model": "openai/gpt-5.3-codex"
     }
   },
   "permission": {
@@ -13,7 +13,6 @@
     },
     "bash": {
       "*": "allow",
-
       "git": "deny",
       "git *": "deny",
       "git status": "allow",
@@ -28,14 +27,11 @@
       "git branch *": "allow",
       "git ls-files": "allow",
       "git ls-files *": "allow",
-
       "jj *": "allow",
       "jj": "allow",
-
       "cargo add": "ask",
       "cargo remove": "ask",
       "cargo install": "deny",
-
       "sed": "deny",
       "sed *": "deny",
       "awk": "deny",
@@ -46,26 +42,22 @@
       "python *": "deny",
       "python3": "deny",
       "python3 *": "deny",
-
       "npm install": "deny",
       "npm i": "deny",
       "bun install": "deny",
       "bun i": "deny",
-
       "rm -rf": "deny",
       "rm -rf *": "deny",
       "dd": "deny",
       "dd *": "deny",
       "truncate": "deny",
       "truncate *": "deny",
-
       "curl * | sh": "deny",
       "curl * | bash": "deny",
       "wget * | sh": "deny",
       "wget * | bash": "deny",
       "eval": "deny",
       "eval *": "deny",
-
       "find * -delete": "deny",
       "find * -exec": "deny",
       "find * -execdir": "deny"
