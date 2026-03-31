@@ -2,6 +2,8 @@
 
 labkey-rs is an unofficial Rust client for the [LabKey Server](https://www.labkey.org/) REST API. It provides typed, async access to LabKey's HTTP endpoints for querying data, managing security, working with assays and experiments, and more. It is a port of the official [`@labkey/api`](https://github.com/LabKey/labkey-api-js) JavaScript/TypeScript client, supplemented by the [Java client](https://github.com/LabKey/labkey-api-java) for endpoint coverage.
 
+> This is a third-party, community-maintained client. It is not an official LabKey product and is not supported by LabKey Corporation.
+
 This book is a companion to the [API reference on docs.rs](https://docs.rs/labkey-rs). The API reference documents every type and method; this book explains how to use them together to get things done.
 
 ## Who this is for

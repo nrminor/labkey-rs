@@ -8,11 +8,19 @@ labkey-rs is an async library built on [reqwest](https://docs.rs/reqwest) and [t
 
 ```toml
 [dependencies]
-labkey-rs = "0.1"
+labkey-rs = "0.2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 You'll also want `serde_json` if you plan to construct row payloads for insert/update/delete operations, but it's not needed for read-only queries.
+
+If you want the experimental SQL APIs, opt in with a feature flag:
+
+```toml
+[dependencies]
+labkey-rs = { version = "0.2", features = ["experimental"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
 
 ## Configure the client
 

@@ -217,6 +217,49 @@ for row in &response.rows {
 
 The [LabKey SQL](../recipes/labkey-sql.md) recipe has more examples of what you can do with `execute_sql`.
 
+### Experimental SQL API for bulk reads
+
+For workloads where `select_rows` and even `execute_sql` include too much response metadata, there is an experimental compact SQL endpoint exposed behind the `experimental` crate feature.
+
+To use it, enable the feature in `Cargo.toml` and import the extension trait:
+
+```rust,no_run
+# use labkey_rs::{ClientConfig, Credential, LabkeyClient};
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+use labkey_rs::query::experimental::{ExperimentalQueryExt, SqlExecuteOptions};
+
+# let client = LabkeyClient::new(ClientConfig::new(
+#     "https://example.com", Credential::Guest, "/",
+# ))?;
+let response = client
+    .experimental_sql_execute(
+        SqlExecuteOptions::builder()
+            .schema("lists")
+            .sql("SELECT RowId, Name FROM Participants")
+            .build(),
+    )
+    .await?;
+
+println!("{} rows, {} columns", response.row_count(), response.column_count());
+let ids = response.column_i64("RowId")?;
+println!("first id = {:?}", ids.first());
+# Ok(())
+# }
+```
+
+This endpoint returns compact, typed row data and also exposes helper methods like `iter_rows`, `into_columns`, and typed column extractors (`column_i64`, `column_f64`, `column_bool`, `column_str`). Because this surface is experimental, it is intentionally gated and may evolve faster than the stable client APIs.
+
+### Security note for SQL endpoints
+
+Both `execute_sql` and `experimental_sql_execute` accept raw SQL strings. Treat that as a privileged API surface.
+
+- Never concatenate untrusted input directly into SQL strings.
+- Prefer allowlisted query templates over arbitrary user-provided SQL.
+- Use least-privilege LabKey credentials for services that run SQL.
+- Put hard limits on result size and query frequency for user-facing workflows.
+
+WAF encoding helps requests pass infrastructure filters, but it is not a substitute for safe query construction.
+
 ## select_distinct_rows
 
 To get the unique values of a single column, use `select_distinct_rows`:

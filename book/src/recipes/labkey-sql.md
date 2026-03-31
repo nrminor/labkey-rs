@@ -86,6 +86,50 @@ let options = ExecuteSqlOptions::builder()
     .build();
 ```
 
+## Experimental compact SQL endpoint (large-table sync)
+
+For very large result sets, LabKey also exposes an experimental SQL endpoint that returns a lean compact payload with less display-oriented metadata. In `labkey-rs`, this API is feature-gated and exposed through an extension trait.
+
+```rust,no_run
+# use labkey_rs::{ClientConfig, Credential, LabkeyClient};
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+use labkey_rs::query::experimental::{ExperimentalQueryExt, SqlExecuteOptions};
+
+# let client = LabkeyClient::new(ClientConfig::new(
+#     "https://example.com", Credential::Guest, "/",
+# ))?;
+let response = client
+    .experimental_sql_execute(
+        SqlExecuteOptions::builder()
+            .schema("lists")
+            .sql("SELECT RowId, Name, Score FROM Participants ORDER BY RowId")
+            .build(),
+    )
+    .await?;
+
+let columnar = response.clone().into_columns();
+let scores = response.column_f64("Score")?;
+
+println!("{} rows", response.row_count());
+println!("{} columns in column-major form", columnar.columns.len());
+println!("first score = {:?}", scores.first());
+# Ok(())
+# }
+```
+
+This is particularly useful for local-first synchronization flows where throughput matters more than UI-style metadata. Since it is experimental, keep usage isolated behind your own abstraction so you can adapt quickly if the wire contract changes.
+
+## Security considerations
+
+`execute_sql` and `experimental_sql_execute` both run raw SQL text. That makes them powerful, but it also means you should treat them as higher-risk interfaces than fixed query calls.
+
+- Do not build SQL with direct string interpolation from untrusted input.
+- Prefer predefined SQL templates with constrained inputs.
+- Use service credentials with the minimum LabKey permissions needed.
+- Apply conservative limits (`max_rows`, paging, request throttling) in interactive systems.
+
+The client's automatic WAF encoding is for compatibility with web-application-firewall deployments; it does not provide SQL injection protection for application code.
+
 ## Differences from standard SQL
 
 LabKey SQL is close to standard SQL but has some differences worth knowing about:

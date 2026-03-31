@@ -1,6 +1,13 @@
 # labkey-rs
 
+[![crates.io](https://img.shields.io/crates/v/labkey-rs.svg)](https://crates.io/crates/labkey-rs)
+[![docs.rs](https://docs.rs/labkey-rs/badge.svg)](https://docs.rs/labkey-rs)
+
 Unofficial Rust client for the [LabKey Server](https://www.labkey.com/) REST API.
+
+> [!IMPORTANT]
+> **This is a third-party client maintained by the community, not by LabKey Corporation.**
+> It is unofficial, not supported by LabKey, and currently maintained outside the official LabKey client suite.
 
 This crate provides typed, async access to LabKey's HTTP endpoints for querying data, managing security, working with assays and experiments, and more. It is a port of the official [`@labkey/api`](https://github.com/LabKey/labkey-api-js) JavaScript/TypeScript client (v1.48.0), supplemented by the [Java client](https://github.com/LabKey/labkey-api-java) for endpoint coverage. It is not affiliated with or endorsed by LabKey Corporation.
 
@@ -10,7 +17,7 @@ Add the dependency to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-labkey-rs = "0.1"
+labkey-rs = "0.2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -82,22 +89,22 @@ API keys are the standard LabKey authentication mechanism — just make sure the
 
 Every endpoint is an async method on `LabkeyClient`. The methods are organized by the LabKey controller they target:
 
-| Module | Description | Endpoints |
-|--------|-------------|-----------|
-| [`query`] | Select, insert, update, delete rows; execute SQL; manage saved views | 21 |
-| [`security`] | Users, groups, containers, permissions, policies, impersonation | 30 |
-| [`experiment`] | Lineage queries, run groups, entity sequences, data objects | 12 |
-| [`assay`] | Assay designs, runs, batches, NAb study graphs, import | 11 |
-| [`domain`] | Domain designs, property usages, name expression validation | 11 |
-| [`specimen`] | Specimen repositories, request management, vial operations | 11 |
-| [`visualization`] | Saved visualizations and chart configurations | 7 |
-| [`report`] | Report creation, execution, and management | 5 |
-| [`pipeline`] | Pipeline status, file status, protocols | 4 |
-| [`storage`] | Freezer storage items (create, update, delete) | 3 |
-| [`di`] | Data integration transform runs and configuration | 3 |
-| [`list`] | List creation with shorthand fields | 1 |
-| [`message`] | Message board threads | 1 |
-| [`participant_group`] | Participant group sessions | 1 |
+| Module                | Description                                                          | Endpoints |
+| --------------------- | -------------------------------------------------------------------- | --------- |
+| [`query`]             | Select, insert, update, delete rows; execute SQL; manage saved views | 21        |
+| [`security`]          | Users, groups, containers, permissions, policies, impersonation      | 30        |
+| [`experiment`]        | Lineage queries, run groups, entity sequences, data objects          | 12        |
+| [`assay`]             | Assay designs, runs, batches, NAb study graphs, import               | 11        |
+| [`domain`]            | Domain designs, property usages, name expression validation          | 11        |
+| [`specimen`]          | Specimen repositories, request management, vial operations           | 11        |
+| [`visualization`]     | Saved visualizations and chart configurations                        | 7         |
+| [`report`]            | Report creation, execution, and management                           | 5         |
+| [`pipeline`]          | Pipeline status, file status, protocols                              | 4         |
+| [`storage`]           | Freezer storage items (create, update, delete)                       | 3         |
+| [`di`]                | Data integration transform runs and configuration                    | 3         |
+| [`list`]              | List creation with shorthand fields                                  | 1         |
+| [`message`]           | Message board threads                                                | 1         |
+| [`participant_group`] | Participant group sessions                                           | 1         |
 
 [`query`]: https://docs.rs/labkey-rs/latest/labkey_rs/query/index.html
 [`security`]: https://docs.rs/labkey-rs/latest/labkey_rs/security/index.html
@@ -174,11 +181,42 @@ async fn handle_query(client: &LabkeyClient) -> Result<(), LabkeyError> {
 
 LabKey sometimes returns HTTP 200 with an embedded exception in the JSON body instead of a proper error status code. The client detects this and returns `LabkeyError::Api` rather than a confusing deserialization error.
 
+## Security notes for SQL APIs
+
+`execute_sql` and the feature-gated experimental SQL API accept raw SQL strings. Treat these as privileged interfaces.
+
+- Never concatenate untrusted input directly into SQL text.
+- Prefer allowlisted query templates over arbitrary user-supplied SQL.
+- Use least-privilege credentials for automation and sync jobs.
+- Apply result-size and rate limits in user-facing systems.
+
+Automatic WAF encoding is for request compatibility with LabKey deployments behind web application firewalls; it is not a replacement for safe query construction.
+
 ## Compatibility
 
 This crate targets LabKey Server's API version 17.1, which is the response format used by all modern LabKey Server releases. The `apiVersion=17.1` parameter is sent on every request. All response types are modeled against this format.
 
+> [!NOTE]
+> `labkey-rs` is currently pre-1.0. Minor-version releases may include API adjustments while the library surface is still being refined.
+
 The crate is pre-1.0 and the API may change. It has not yet been published to crates.io.
+The crate is pre-1.0 and the API may change.
+
+## Experimental APIs
+
+Some APIs are intentionally feature-gated while they mature.
+
+> [!TIP]
+> To enable experimental APIs, add the `experimental` feature and import the extension trait from `query::experimental`.
+
+```toml
+[dependencies]
+labkey-rs = { version = "0.2", features = ["experimental"] }
+```
+
+Then import the extension trait where you call experimental methods:
+
+`use labkey_rs::query::experimental::{ExperimentalQueryExt, SqlExecuteOptions};`
 
 ## LabKey documentation
 

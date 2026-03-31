@@ -61,6 +61,7 @@
 !/examples/select_rows.rs
 !/examples/filters_and_sorts.rs
 !/examples/execute_sql.rs
+!/examples/experimental_sql.rs
 !/examples/insert_update_delete.rs
 !/examples/pagination.rs
 !/examples/error_handling.rs
