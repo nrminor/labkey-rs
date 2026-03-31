@@ -13,11 +13,11 @@ choose:
 # === Development Workflow ===
 
 # Run all pre-commit checks (required before committing)
-check: fmt-check lint test doc-check
+check: fmt-check lint lint-default test doc-check
     @echo "All checks passed"
 
 # Run checks on all files (required before pushing)
-check-all: fmt-check lint-all test-all doc-check
+check-all: fmt-check lint-all lint-default test-all doc-check
     @echo "All checks passed on full codebase"
 
 # === Formatting ===
@@ -35,6 +35,10 @@ fmt:
 # Run clippy with deny warnings
 lint:
     cargo clippy --all-targets --all-features -- -D warnings
+
+# Run clippy with default features only
+lint-default:
+    cargo clippy --all-targets -- -D warnings
 
 # Run clippy on all files
 lint-all:

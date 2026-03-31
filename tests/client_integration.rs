@@ -62,6 +62,7 @@ use labkey_rs::specimen::{
 use labkey_rs::storage::{
     CreateStorageItemOptions, DeleteStorageItemOptions, StorageType, UpdateStorageItemOptions,
 };
+#[cfg(feature = "internal-test-support")]
 use url::Url;
 use wiremock::matchers::{
     basic_auth, body_json, body_string, body_string_contains, header, header_exists, method, path,

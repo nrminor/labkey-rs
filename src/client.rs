@@ -504,6 +504,7 @@ impl LabkeyClient {
 
     /// Send a POST request with a JSON body and request options,
     /// returning the raw text response body.
+    #[cfg(feature = "experimental")]
     pub(crate) async fn post_text_with_options<B: serde::Serialize>(
         &self,
         url: Url,
@@ -673,6 +674,7 @@ impl LabkeyClient {
         }
     }
 
+    #[cfg(feature = "experimental")]
     async fn handle_text_response(
         &self,
         response: reqwest::Response,
