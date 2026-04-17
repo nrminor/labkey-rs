@@ -735,9 +735,27 @@ async fn experimental_sql_execute_posts_expected_body_and_parses_compact_payload
     ]
     .join(SQL_EXPERIMENTAL_DEFAULT_EOL);
 
+    Mock::given(method("GET"))
+        .and(path("/MyProject/MyFolder/login-whoami.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("Set-Cookie", "LABKEY_SESSION=test-session; Path=/")
+                .set_body_json(serde_json::json!({
+                    "authenticated": true,
+                    "email": "test@example.com",
+                    "CSRF": "csrf-from-whoami"
+                })),
+        )
+        .mount(&server)
+        .await;
+
     Mock::given(method("POST"))
         .and(path("/MyProject/MyFolder/sql-execute.view"))
         .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(header("x-labkey-csrf", "csrf-from-whoami"))
+        .and(header("cookie", "LABKEY_SESSION=test-session"))
         .and(basic_auth("apikey", "test-api-key"))
         .and(body_json(serde_json::json!({
             "schema": "core",
@@ -770,6 +788,41 @@ async fn experimental_sql_execute_posts_expected_body_and_parses_compact_payload
     assert_eq!(response.rows[1][0], serde_json::json!(1));
     assert_eq!(response.rows[1][1], serde_json::json!(2.5));
     assert_eq!(response.rows[1][2], serde_json::json!("alpha"));
+}
+
+#[cfg(feature = "experimental")]
+#[tokio::test]
+async fn experimental_sql_execute_errors_when_whoami_lacks_csrf() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/MyProject/MyFolder/login-whoami.api"))
+        .and(header("x-requested-with", "XMLHttpRequest"))
+        .and(basic_auth("apikey", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "authenticated": true,
+            "email": "test@example.com"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let error = client
+        .experimental_sql_execute(
+            ExperimentalSqlExecuteOptions::builder()
+                .schema("core".to_string())
+                .sql("SELECT id FROM core.table".to_string())
+                .build(),
+        )
+        .await
+        .expect_err("missing whoami CSRF should fail");
+
+    match error {
+        LabkeyError::InvalidInput(message) => {
+            assert!(message.contains("did not return a CSRF token"));
+        }
+        other => panic!("expected InvalidInput, got {other:?}"),
+    }
 }
 
 #[cfg(feature = "experimental")]

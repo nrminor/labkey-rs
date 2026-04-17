@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = LabkeyClient::new(config)?;
 
     // Keep SQL template-controlled and static in structure.
-    let sql = format!("SELECT * FROM {schema}.{query} ORDER BY RowId");
+    let sql = format!("SELECT * FROM {schema}.{query}");
 
     let response = client
         .experimental_sql_execute(

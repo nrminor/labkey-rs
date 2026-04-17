@@ -5,8 +5,11 @@
 //! default container path, and authentication credentials. Every API endpoint
 //! method is an async method on this struct.
 
-use std::io::BufRead;
-use std::time::Duration;
+use std::{
+    io::BufRead,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use reqwest::StatusCode;
 use url::Url;
@@ -263,7 +266,7 @@ pub struct LabkeyClient {
     base_url: Url,
     container_path: String,
     credential: Credential,
-    csrf_token: Option<String>,
+    csrf_token: Arc<Mutex<Option<String>>>,
 }
 
 /// Internal request options for fine-grained HTTP behavior.
@@ -295,7 +298,7 @@ impl LabkeyClient {
             base_url,
             container_path: config.container_path,
             credential: config.credential,
-            csrf_token: config.csrf_token,
+            csrf_token: Arc::new(Mutex::new(config.csrf_token)),
         })
     }
 
@@ -305,7 +308,8 @@ impl LabkeyClient {
     ) -> Result<reqwest::Client, LabkeyError> {
         let mut builder = reqwest::Client::builder()
             .user_agent(config.user_agent.clone())
-            .danger_accept_invalid_certs(config.accept_self_signed_certs);
+            .danger_accept_invalid_certs(config.accept_self_signed_certs)
+            .cookie_store(true);
 
         if let Some(proxy_url) = config.proxy_url.as_deref() {
             builder = builder.proxy(reqwest::Proxy::all(proxy_url)?);
@@ -316,6 +320,23 @@ impl LabkeyClient {
         }
 
         Ok(builder.build()?)
+    }
+
+    pub(crate) fn csrf_token(&self) -> Result<Option<String>, LabkeyError> {
+        self.csrf_token
+            .lock()
+            .map(|token| token.clone())
+            .map_err(|_| LabkeyError::InvalidInput("CSRF token mutex poisoned".into()))
+    }
+
+    #[cfg(feature = "experimental")]
+    pub(crate) fn set_csrf_token(&self, token: String) -> Result<(), LabkeyError> {
+        let mut csrf_token = self
+            .csrf_token
+            .lock()
+            .map_err(|_| LabkeyError::InvalidInput("CSRF token mutex poisoned".into()))?;
+        *csrf_token = Some(token);
+        Ok(())
     }
 
     /// Build a LabKey action URL.
@@ -358,8 +379,8 @@ impl LabkeyClient {
     /// `X-LABKEY-CSRF` header when a CSRF token is configured.
     fn prepare_request(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         let mut builder = builder.header("X-Requested-With", "XMLHttpRequest");
-        if let Some(token) = &self.csrf_token {
-            builder = builder.header("X-LABKEY-CSRF", token.as_str());
+        if let Ok(Some(token)) = self.csrf_token() {
+            builder = builder.header("X-LABKEY-CSRF", token);
         }
         match &self.credential {
             Credential::Basic { email, password } => builder.basic_auth(email, Some(password)),

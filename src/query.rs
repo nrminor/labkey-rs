@@ -32,7 +32,7 @@ pub mod experimental {
     use reqwest::StatusCode;
     use serde::Serialize;
 
-    use crate::{client::LabkeyClient, error::LabkeyError};
+    use crate::{LabkeyClient, error::LabkeyError, security::WhoAmIOptions};
 
     /// Default field separator used by LabKey's experimental SQL endpoint.
     ///
@@ -553,6 +553,24 @@ pub mod experimental {
                 return Err(LabkeyError::InvalidInput(
                     "sql is required for sql-execute.view".to_string(),
                 ));
+            }
+
+            if self.csrf_token()?.is_none() {
+                let whoami = self
+                    .who_am_i(
+                        WhoAmIOptions::builder()
+                            .maybe_container_path(options.container_path.clone())
+                            .build(),
+                    )
+                    .await?;
+
+                let csrf = whoami.csrf.ok_or_else(|| {
+                    LabkeyError::InvalidInput(
+                        "login-whoami.api did not return a CSRF token required for sql-execute.view"
+                            .to_string(),
+                    )
+                })?;
+                self.set_csrf_token(csrf)?;
             }
 
             let sep = options.sep.unwrap_or_else(|| DEFAULT_SEP.to_string());
