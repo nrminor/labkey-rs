@@ -158,6 +158,8 @@ clone-refs:
     git clone https://github.com/LabKey/labkey-api-js.git .agents/repos/labkey-api-js || echo "labkey-api-js already exists, skipping"
     @echo "Cloning labkey-api-java (upstream Java client)..."
     git clone https://github.com/LabKey/labkey-api-java.git .agents/repos/labkey-api-java || echo "labkey-api-java already exists, skipping"
+    @echo "Cloning labkey-api-python (upstream Python client)..."
+    git clone https://github.com/LabKey/labkey-api-python.git .agents/repos/labkey-api-java || echo "labkey-api-python already exists, skipping"
     @echo "Reference repositories cloned to .agents/repos/"
 
 # Update reference repositories to latest
